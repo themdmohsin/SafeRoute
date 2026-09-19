@@ -6,6 +6,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
+import LandingPage from './landing/LandingPage.tsx';
 import SplashScreen from './pages/SplashScreen.tsx';
 import LoginScreen from './pages/LoginScreen.tsx';
 import RegisterScreen from './pages/RegisterScreen.tsx';
@@ -21,7 +22,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<SplashScreen />} />
+        {/* Public landing page — entry point before login */}
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/splash" element={<SplashScreen />} />
         <Route path="/login" element={<LoginScreen />} />
         <Route path="/register" element={<RegisterScreen />} />
         <Route path="/home" element={<HomeScreen />} />
