@@ -65,6 +65,29 @@ const PALE_BG = "#f4f7ff";
 /** Subtle looping gradient used until a real hero video asset is provided. */
 const PLACEHOLDER_GRADIENT = `linear-gradient(135deg, #03224d 0%, #1f3864 45%, #0e1b33 100%)`;
 
+/**
+ * Static OSM map of central Bengaluru used as the hero backdrop (attribution required).
+ * Composed from official OSM raster tiles around 12.9716°N, 77.5946°E at zoom 13
+ * (the staticmap.openstreetmap.de service this replaces has been shut down).
+ * 4 tiles × 3 tiles @ 256px ≈ 1024×768 — same framing as a 1200x900 static map.
+ */
+const MAP_ZOOM = 13;
+const TILE_SIZE = 256;
+const MAP_COLS = 4;
+const MAP_ROWS = 3;
+const MAP_CENTER = { lat: 12.9716, lng: 77.5946 };
+
+// North-west tile of the grid, derived from the center lat/lng (slippy-map math)
+const BASE_TILE = (() => {
+  const n = Math.pow(2, MAP_ZOOM);
+  const x = Math.floor(((MAP_CENTER.lng + 180) / 360) * n);
+  const latRad = (MAP_CENTER.lat * Math.PI) / 180;
+  const y = Math.floor(
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
+  );
+  return { x, y };
+})();
+
 // ---------------------------------------------------------------------------
 // Helper – Count-up animation for the live hazard counters
 // ---------------------------------------------------------------------------
@@ -275,26 +298,75 @@ export const WorkPageHero: React.FC<WorkPageHeroProps> = ({
               />
             )
           ) : (
-            /* Animated gradient placeholder until a real video asset is added */
-            <div
-              className="w-full h-full"
-              style={{
-                background: PLACEHOLDER_GRADIENT,
-                backgroundSize: "200% 200%",
-                animation: "heroGradientDrift 14s ease-in-out infinite",
-              }}
-            >
-              {/* faint road-grid texture, echoing the stats section backdrop */}
+            /* Map backdrop until a real video asset is added:
+               OSM static map → brand tint → amber glow → grid → telemetry chrome */
+            <div className="w-full h-full relative overflow-hidden">
+              {/* base brand gradient (also the fallback if the map fails to load) */}
               <div
-                className="w-full h-full opacity-[0.08]"
+                className="absolute inset-0"
+                style={{
+                  background: PLACEHOLDER_GRADIENT,
+                  backgroundSize: "200% 200%",
+                  animation: "heroGradientDrift 14s ease-in-out infinite",
+                }}
+              />
+
+              {/* Bengaluru map composed from official OSM tiles (© OpenStreetMap contributors) */}
+              <div
+                className="absolute inset-0 grid"
+                style={{
+                  gridTemplateColumns: `repeat(${MAP_COLS}, 1fr)`,
+                  gridTemplateRows: `repeat(${MAP_ROWS}, 1fr)`,
+                }}
+              >
+                {Array.from({ length: MAP_COLS * MAP_ROWS }, (_, i) => {
+                  const col = i % MAP_COLS;
+                  const row = Math.floor(i / MAP_COLS);
+                  return (
+                    <img
+                      key={i}
+                      src={`https://tile.openstreetmap.org/${MAP_ZOOM}/${BASE_TILE.x + col}/${BASE_TILE.y + row}.png`}
+                      alt=""
+                      aria-hidden="true"
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                      style={{ opacity: 0.9 }}
+                      onError={(e) => {
+                        e.currentTarget.style.visibility = "hidden";
+                      }
+                      }
+                    />
+                  );
+                })}
+              </div>
+
+              {/* dark brand tint over the map */}
+              <div
+                className="absolute inset-0"
+                style={{ background: "rgba(3, 34, 77, 0.75)" }}
+              />
+
+              {/* faint amber glow tying the map into the palette */}
+              <div
+                className="absolute inset-0"
+                style={{
+                  background:
+                    "radial-gradient(circle at 18% 78%, rgba(255,185,85,0.14), transparent 45%)",
+                }}
+              />
+
+              {/* road-grid texture kept as a subtle overlay on top of the map */}
+              <div
+                className="absolute inset-0 opacity-[0.10]"
                 style={{
                   backgroundImage:
                     "linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)",
                   backgroundSize: "48px 48px",
                 }}
               />
+
               <div
-                className="absolute bottom-6 left-6 md:bottom-10 md:left-10 flex items-center gap-2 text-white/70 text-xs md:text-sm font-medium tracking-wide uppercase"
+                className="absolute bottom-6 left-6 md:bottom-10 md:left-10 flex items-center gap-2 text-xs md:text-sm font-medium tracking-wide uppercase"
                 style={{ color: "#d8e2ff" }}
               >
                 <span
@@ -303,6 +375,16 @@ export const WorkPageHero: React.FC<WorkPageHeroProps> = ({
                 />
                 Live hazard telemetry — Bengaluru
               </div>
+
+              {/* Required OpenStreetMap attribution */}
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="absolute bottom-1.5 right-3 text-[9px] md:text-[10px] leading-none text-white/35 hover:text-white/60 transition-colors"
+              >
+                © OpenStreetMap contributors
+              </a>
             </div>
           )}
         </div>
