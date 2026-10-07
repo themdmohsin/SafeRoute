@@ -2,5 +2,5 @@
   "name": "SafeRoute",
   "description": "Hyperlocal road hazard alerts, live pothole crowdsourcing, and civic telemetry for urban commuters.",
   "requestFramePermissions": ["geolocation"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_ANTHROPIC_API"]
 }
