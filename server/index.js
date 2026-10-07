@@ -1,7 +1,10 @@
-import 'dotenv/config';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import cors from 'cors';
 import express from 'express';
 import { connectDatabase } from './config/database.js';
+
+dotenv.config({ path: fileURLToPath(new URL('.env', import.meta.url)) });
 import authRoutes from './routes/authRoutes.js';
 import hazardRoutes from './routes/hazardRoutes.js';
 import rideRoutes from './routes/rideRoutes.js';
