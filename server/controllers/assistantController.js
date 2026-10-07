@@ -1,5 +1,5 @@
 import HazardReport from '../models/HazardReport.js';
-import { askGemini } from '../services/gemini.js';
+import { askAnthropic } from '../services/anthropic.js';
 
 const knownAreas = [
   'Indiranagar', 'Koramangala', 'Silk Board', 'Outer Ring Road', 'Whitefield',
@@ -35,8 +35,8 @@ export async function askAssistant(req, res) {
   if (!question || question.length > 1000) {
     return res.status(400).json({ message: 'Provide a question of 1 to 1000 characters.' });
   }
-  if (!process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ message: 'AI assistant is not configured. Set GEMINI_API_KEY in server/.env.' });
+  if (!process.env.ANTHROPIC_API_KEY || !process.env.ANTHROPIC_MODEL) {
+    return res.status(503).json({ message: 'AI assistant is not configured. Set ANTHROPIC_API_KEY and ANTHROPIC_MODEL in server/.env.' });
   }
 
   const { filter, area, severity, since } = deriveQuery(question);
@@ -61,7 +61,7 @@ export async function askAssistant(req, res) {
   };
 
   try {
-    const answer = await askGemini(
+    const answer = await askAnthropic(
       question,
       context,
       'You are SafeRoute’s road safety assistant. Answer using only the supplied MongoDB data. If it does not contain enough information, say so clearly. Do not invent routes, counts, locations, or real-time conditions. Keep the answer concise and practical.',
@@ -69,7 +69,7 @@ export async function askAssistant(req, res) {
     if (!answer) return res.status(502).json({ message: 'The AI assistant returned an empty response.' });
     return res.json({ answer, dataUsed: { matchingHazardCount: context.matchingHazardCount, appliedFilters: context.appliedFilters } });
   } catch (error) {
-    console.error('Gemini assistant request failed:', error.message);
+    console.error('Anthropic assistant request failed.');
     return res.status(502).json({ message: 'The AI assistant is temporarily unavailable.' });
   }
 }

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import HazardReport from '../models/HazardReport.js';
-import { classifySeverity } from '../services/gemini.js';
+import { classifySeverity } from '../services/anthropic.js';
 
 const allowedTypes = ['pothole', 'waterlogging', 'open_manhole', 'speed_breaker', 'other'];
 const allowedSeverities = ['low', 'medium', 'high'];
@@ -35,7 +35,7 @@ export async function createHazard(req, res) {
     });
     return res.status(201).json({
       hazard: report,
-      classification: classification ? { ...classification, note: classification.aiSuggested ? 'Suggested by Gemini from the report description.' : 'Gemini unavailable; medium severity used as a fallback.' } : null,
+      classification: classification ? { ...classification, note: classification.aiSuggested ? 'Suggested by Claude from the report description.' : 'AI unavailable; medium severity used as a fallback.' } : null,
     });
   } catch (error) {
     if (error.name === 'ValidationError') return res.status(400).json({ message: error.message });
