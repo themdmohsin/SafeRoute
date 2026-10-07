@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
 import Toast from '../components/Toast.tsx';
+import { useAuth } from '../auth/AuthContext';
 
 export default function ProfileScreen() {
   const navigate = useNavigate();
+  const { logout, user } = useAuth();
   const [audibleAlerts, setAudibleAlerts] = useState(true);
   const [autoDetect, setAutoDetect] = useState(true);
   const [anonymousTelemetry, setAnonymousTelemetry] = useState(true);
@@ -20,14 +22,12 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = () => {
-    showToast('Logged out securely. See you on the road!');
-    setTimeout(() => {
-      navigate('/login');
-    }, 700);
+    logout();
+    navigate('/login', { replace: true });
   };
 
   const handleExportData = () => {
-    showToast('Civic road telemetry reports exported as CSV');
+    showToast('Data export is not available yet.');
   };
 
   return (
@@ -46,26 +46,26 @@ export default function ProfileScreen() {
               <div className="relative">
                 <div className="w-20 h-20 rounded-full bg-surface-container-lowest p-1 shadow-xl">
                   <div className="w-full h-full rounded-full bg-gradient-to-tr from-tertiary-fixed-dim to-on-tertiary-container flex items-center justify-center text-primary font-bold text-2xl">
-                    AS
+                    {user?.name?.split(' ').map((part) => part[0]).join('').slice(0, 2) || 'SR'}
                   </div>
                 </div>
                 <span className="absolute bottom-0 right-0 px-2 py-0.5 rounded-full bg-tertiary-fixed text-on-tertiary-fixed text-[10px] font-bold shadow">
-                  Lv. 4
+                  Account
                 </span>
               </div>
 
               <div className="flex flex-col flex-1">
                 <div className="flex items-center justify-center sm:justify-start gap-2">
-                  <h2 className="font-headline-lg-mobile text-xl font-bold text-on-primary">Arjun Sharma</h2>
+                  <h2 className="font-headline-lg-mobile text-xl font-bold text-on-primary">{user?.name || 'SafeRoute Commuter'}</h2>
                   <span className="material-symbols-outlined text-tertiary-fixed text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>
                     verified
                   </span>
                 </div>
-                <p className="font-body-sm text-xs text-primary-fixed">arjun.sharma@example.com</p>
+                <p className="font-body-sm text-xs text-primary-fixed">{user?.email}</p>
                 <div className="flex items-center justify-center sm:justify-start gap-1.5 mt-2">
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-surface-container-lowest/20 backdrop-blur-md text-xs text-on-primary font-semibold">
                     <span className="w-1.5 h-1.5 rounded-full bg-tertiary-fixed-dim"></span>
-                    Bengaluru Road Scout
+                    {user?.role || 'commuter'} account
                   </span>
                   <span className="text-xs text-primary-fixed-dim">• Indiranagar</span>
                 </div>
@@ -75,16 +75,16 @@ export default function ProfileScreen() {
             {/* Profile Counter Matrix */}
             <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-primary-fixed-dim/20 text-center">
               <div>
-                <span className="font-display text-xl font-bold text-on-primary">42</span>
-                <p className="text-[11px] text-primary-fixed mt-0.5">Reports Filed</p>
+                <span className="font-display text-xl font-bold text-on-primary">—</span>
+                <p className="text-[11px] text-primary-fixed mt-0.5">Reports not counted</p>
               </div>
               <div className="border-x border-primary-fixed-dim/20">
-                <span className="font-display text-xl font-bold text-tertiary-fixed-dim">38</span>
-                <p className="text-[11px] text-primary-fixed mt-0.5">BBMP Fixed</p>
+                <span className="font-display text-xl font-bold text-tertiary-fixed-dim">—</span>
+                <p className="text-[11px] text-primary-fixed mt-0.5">Repairs not tracked</p>
               </div>
               <div>
-                <span className="font-display text-xl font-bold text-on-primary">1,240</span>
-                <p className="text-[11px] text-primary-fixed mt-0.5">Civic Karma</p>
+                <span className="font-display text-xl font-bold text-on-primary">—</span>
+                <p className="text-[11px] text-primary-fixed mt-0.5">Points not tracked</p>
               </div>
             </div>
           </div>
@@ -92,8 +92,8 @@ export default function ProfileScreen() {
           {/* Commuter Badges Row */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <h3 className="font-headline-sm text-sm font-bold text-primary">Earned Badges</h3>
-              <span className="text-xs text-secondary font-semibold">4 / 6 unlocked</span>
+                  <h3 className="font-headline-sm text-sm font-bold text-primary">Badge examples (not tracked)</h3>
+              <span className="text-xs text-secondary font-semibold">Not tracked</span>
             </div>
             <div className="grid grid-cols-4 gap-2">
               <div className="flex flex-col items-center p-2.5 rounded-2xl bg-surface-container-low text-center gap-1 border border-outline-variant/10">
@@ -122,12 +122,12 @@ export default function ProfileScreen() {
                 <span className="material-symbols-outlined text-2xl">two_wheeler</span>
               </div>
               <div>
-                <p className="font-label-md font-bold text-on-surface">Royal Enfield Hunter 350</p>
+                <p className="font-label-md font-bold text-on-surface">{user?.vehicleType || 'No vehicle type set'}</p>
                 <p className="font-body-sm text-xs text-secondary font-mono">KA-04-ME-4412 • Two-Wheeler Suspension</p>
               </div>
             </div>
             <button
-              onClick={() => showToast('Vehicle specifications verified')}
+              onClick={() => showToast('Vehicle editing is not available yet.')}
               className="text-primary hover:text-surface-tint p-1.5 rounded-lg active:bg-surface-container cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">edit</span>
@@ -136,7 +136,7 @@ export default function ProfileScreen() {
 
           {/* Settings & Telemetry Preferences */}
           <div className="bg-surface-container-low rounded-3xl p-4 shadow-sm flex flex-col gap-4 border border-outline-variant/10">
-            <h3 className="font-headline-sm text-sm font-bold text-primary">Ride & Safety Preferences</h3>
+            <h3 className="font-headline-sm text-sm font-bold text-primary">Preferences preview (not saved)</h3>
 
             <div className="flex flex-col gap-3">
               {/* Toggle 1: Audible Alerts */}

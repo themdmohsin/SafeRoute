@@ -1,16 +1,41 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
 import Toast from '../components/Toast.tsx';
+import AssistantChat from '../components/AssistantChat.tsx';
+import { apiRequest } from '../lib/api';
+import { useAuth } from '../auth/AuthContext';
+
+interface HomeHazard {
+  _id: string;
+  hazardType: string;
+  severity: string;
+  description: string;
+  area?: string;
+  roadName?: string;
+  status: string;
+}
 
 export default function HomeScreen() {
   const navigate = useNavigate();
-  const [activeFilter, setActiveFilter] = useState('All (12)');
-  const [confirmedCard1, setConfirmedCard1] = useState(false);
+  const { user } = useAuth();
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [hazards, setHazards] = useState<HomeHazard[]>([]);
+  const [hazardsError, setHazardsError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const [toastIcon, setToastIcon] = useState('check_circle');
   const [isToastOpen, setIsToastOpen] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams({ limit: '5', page: '1' });
+    if (activeFilter === 'Deep Potholes') params.set('hazardType', 'pothole');
+    if (activeFilter === 'Waterlogging') params.set('hazardType', 'waterlogging');
+    if (activeFilter === 'Roadwork') params.set('hazardType', 'speed_breaker');
+    apiRequest<{ hazards: HomeHazard[] }>(`/hazards?${params.toString()}`)
+      .then(({ hazards: recent }) => { setHazards(recent); setHazardsError(''); })
+      .catch((error) => setHazardsError(error instanceof Error ? error.message : 'Could not load hazards.'));
+  }, [activeFilter]);
 
   const showToast = (msg: string, icon = 'check_circle') => {
     setToastMessage(msg);
@@ -18,8 +43,28 @@ export default function HomeScreen() {
     setIsToastOpen(true);
   };
 
-  const handleInstantReport = (type: string) => {
-    showToast(`Instant ${type} pinned at 100ft Road! Telemetry synced.`, 'pin_drop');
+  const handleInstantReport = async (type: string) => {
+    const hazardType = type === 'Waterlog' ? 'waterlogging' : type === 'Open Manhole' ? 'open_manhole' : 'pothole';
+    try {
+      if (!navigator.geolocation) throw new Error('This browser does not provide device location.');
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error('Allow location access to submit a quick report.')), { enableHighAccuracy: true, timeout: 10000 });
+      });
+      await apiRequest('/hazards', {
+        method: 'POST',
+        body: {
+          hazardType,
+          description: `Quick ${type} report near 12th Main junction.`,
+          location: { type: 'Point', coordinates: [position.coords.longitude, position.coords.latitude] },
+          roadName: 'Device location',
+          area: 'Bengaluru',
+          source: 'manual',
+        },
+      });
+      showToast(`Instant ${type} report saved.`, 'pin_drop');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not save quick report.', 'error');
+    }
   };
 
   return (
@@ -33,20 +78,15 @@ export default function HomeScreen() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-space-sm">
                 <h1 className="font-headline-lg-mobile text-headline-lg-mobile text-primary tracking-tight font-bold">
-                  Hi, Arjun 👋
+                  Hi, {user?.name?.split(' ')[0] || 'Commuter'} ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â¹
                 </h1>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-tertiary-fixed-dim/30 text-on-tertiary-container font-label-sm text-label-sm font-semibold">
-                  Commuter Pro
-                </span>
               </div>
               <button
                 aria-label="Quick alerts"
-                onClick={() => showToast('2 unread road notifications for your route', 'notifications')}
+                onClick={() => showToast('Road notifications are not connected yet.', 'notifications')}
                 className="relative w-10 h-10 rounded-full bg-surface-container-low flex items-center justify-center text-primary active:scale-95 transition-transform cursor-pointer border border-outline-variant/10"
               >
                 <span className="material-symbols-outlined text-[22px]">notifications</span>
-                <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 rounded-full bg-tertiary-fixed-dim animate-ping opacity-75"></span>
-                <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-tertiary-fixed-dim shadow-[0_0_8px_rgba(255,185,85,0.8)]"></span>
               </button>
             </div>
 
@@ -58,16 +98,16 @@ export default function HomeScreen() {
                 </div>
                 <div className="flex flex-col min-w-0">
                   <span className="font-label-md text-label-md text-on-surface truncate font-semibold">
-                    100ft Rd, Indiranagar
+                    Example area: Indiranagar
                   </span>
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-                    <span className="font-label-sm text-label-sm text-on-surface-variant">Live GPS • High Accuracy (±2m)</span>
+                    <span className="font-label-sm text-label-sm text-on-surface-variant">Location tracking is not connected</span>
                   </div>
                 </div>
               </div>
               <button
-                onClick={() => showToast('GPS recalibrated: accuracy ±1.8m', 'my_location')}
+                onClick={() => showToast('Location tracking is not connected yet.', 'my_location')}
                 className="text-surface-tint hover:text-primary transition-colors flex items-center shrink-0 p-1 cursor-pointer"
                 title="Recalibrate GPS"
               >
@@ -85,7 +125,7 @@ export default function HomeScreen() {
               <div className="flex items-start justify-between">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-tertiary-fixed-dim/20 backdrop-blur-md text-tertiary-fixed-dim font-label-sm text-label-sm">
                   <span className="material-symbols-outlined text-[14px]">sensors</span>
-                  AI Pothole Auto-Detect Active
+                  SafeRoute hazard reports
                 </span>
                 <div className="w-10 h-10 rounded-2xl bg-surface-container-lowest/10 backdrop-blur-md flex items-center justify-center text-tertiary-fixed-dim">
                   <span className="material-symbols-outlined text-[24px]">route</span>
@@ -97,7 +137,7 @@ export default function HomeScreen() {
                   Safe Commute Mode
                 </h2>
                 <p className="font-body-sm text-body-sm text-on-primary-container leading-relaxed">
-                  Real-time audible warnings for 42 verified craters & sudden speed humps on your route.
+                  Review recent community reports. Automatic vehicle detection and turn-by-turn guidance are not connected.
                 </p>
               </div>
 
@@ -115,68 +155,13 @@ export default function HomeScreen() {
             </div>
           </div>
 
-          {/* Quick Civic Telemetry Metrics */}
-          <div className="grid grid-cols-3 gap-2.5">
-            <div className="flex flex-col p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10">
-              <div className="flex items-center gap-1 text-on-surface-variant mb-1">
-                <span className="material-symbols-outlined text-[16px] text-surface-tint">verified_user</span>
-                <span className="font-label-sm text-label-sm font-semibold">Safety</span>
-              </div>
-              <span className="font-display text-lg font-bold text-primary leading-none">
-                88<span className="text-xs text-on-surface-variant font-normal">/100</span>
-              </span>
-              <span className="font-label-sm text-label-sm text-on-surface-variant mt-1 truncate">Optimal route</span>
-            </div>
-
-            <div className="flex flex-col p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10">
-              <div className="flex items-center gap-1 text-on-surface-variant mb-1">
-                <span className="material-symbols-outlined text-[16px] text-tertiary-container">troubleshoot</span>
-                <span className="font-label-sm text-label-sm font-semibold">Avoided</span>
-              </div>
-              <span className="font-display text-lg font-bold text-on-tertiary-container leading-none">14</span>
-              <span className="font-label-sm text-label-sm text-on-surface-variant mt-1 truncate">Hazards today</span>
-            </div>
-
-            <div className="flex flex-col p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10">
-              <div className="flex items-center gap-1 text-on-surface-variant mb-1">
-                <span className="material-symbols-outlined text-[16px] text-primary">military_tech</span>
-                <span className="font-label-sm text-label-sm font-semibold">Impact</span>
-              </div>
-              <span className="font-display text-lg font-bold text-primary leading-none">Top 5%</span>
-              <span className="font-label-sm text-label-sm text-on-surface-variant mt-1 truncate">Bengaluru East</span>
-            </div>
-          </div>
-
-          {/* Live Mini Area Radar Map Thumbnail */}
-          <div
-            onClick={() => navigate('/ride/start')}
-            className="relative w-full h-36 rounded-3xl overflow-hidden shadow-sm cursor-pointer group"
-          >
-            <div
-              className="w-full h-full bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
-              style={{
-                backgroundImage: `url('https://lh3.googleusercontent.com/aida-public/AB6AXuBumv8pZM6rgNfV9roEdKMGm5twCdV1SJxk55uitLmvu-GYISWw-XAsj7Br38Kzw8nh_bIjhLqTEmGuUuHvXjsKKkHi9oxImmVBMgZEcjODYk1F0vOELE36aR3iVOsnWenp0k1yvpuc9CqAFKidk8Bd-85YJc5QR-YplPTN64fGEL3_zUCmQtwuvKx0Cp8LOxGQIVFyea5p--E2jcQSsDvfcaGS9wq2XTVsq_5kDZ7vEqAmV7xVda8j')`,
-              }}
-            ></div>
-            <div className="absolute inset-0 bg-gradient-to-t from-primary/80 via-primary/20 to-transparent"></div>
-            <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-on-primary">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-tertiary-fixed-dim animate-ping"></span>
-                <span className="font-label-sm text-label-sm font-semibold">3 Reports Active Within 1.5 km</span>
-              </div>
-              <span className="font-label-sm text-label-sm px-2.5 py-1 rounded-full bg-surface-container-lowest/20 backdrop-blur-md font-semibold">
-                Radar View
-              </span>
-            </div>
-          </div>
-
-          {/* Section: Recent Hazards Near You */}
+          {/* Section: Recent Recent Hazard Reports */}
           <div className="flex flex-col gap-space-md">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <h3 className="font-headline-sm text-headline-sm text-primary font-bold">Hazards Near You</h3>
+                <h3 className="font-headline-sm text-headline-sm text-primary font-bold">Recent Hazard Reports</h3>
                 <span className="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm font-semibold">
-                  3 Live
+                  {hazards.length} loaded
                 </span>
               </div>
               <button
@@ -189,7 +174,7 @@ export default function HomeScreen() {
 
             {/* Filter Chips */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-margin px-margin no-scrollbar">
-              {['All (12)', 'Deep Potholes', 'Waterlogging', 'Roadwork'].map((filter) => (
+              {['All', 'Deep Potholes', 'Waterlogging', 'Roadwork'].map((filter) => (
                 <button
                   key={filter}
                   onClick={() => setActiveFilter(filter)}
@@ -206,154 +191,19 @@ export default function HomeScreen() {
 
             {/* Hazard Incident Cards */}
             <div className="flex flex-col gap-space-sm">
-              {/* Card 1: Severe Pothole */}
-              {(activeFilter === 'All (12)' || activeFilter === 'Deep Potholes') && (
-                <div className="flex flex-col p-4 rounded-2xl bg-surface-container-lowest shadow-sm hover:shadow-md transition-shadow gap-space-sm border border-outline-variant/10">
-                  <div className="flex items-start gap-3">
-                    <div className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-surface-container">
-                      <img
-                        className="w-full h-full object-cover"
-                        alt="Pothole crack"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCgilNwVtxPwTIxgiugzdQOyvaWO_JQwEpZVQwsT-IU17wuhBWsVWS2XUdUl1B5Bo4RMR0aCCLk_FYB43Y-DNiRzm0I2dUQZCjKadKfK7-117FBQiGrYj88ZpZSrhtfV7mNGYXeuL_wnT4XvmknvLlDlRcCML-E4ysxStqog7Cs5Y24UeUBhlEEiG-9YxrxolTq0BeUV39oLmQqHfJ4kjhFoTR_1iKKx-Kv-FE7lnJOSu8jXcC5a5id"
-                      />
-                      <span className="absolute bottom-1 right-1 px-1 rounded bg-black/60 text-white font-label-sm text-[9px] leading-tight">
-                        12cm
-                      </span>
-                    </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 font-label-sm text-label-sm font-semibold">
-                          <span className="material-symbols-outlined text-[13px] text-amber-600">warning</span>
-                          Severe Pothole
-                        </span>
-                        <span className="font-label-md text-label-md text-error font-semibold shrink-0">120m away</span>
-                      </div>
-                      <h4 className="font-headline-sm text-sm text-on-surface font-bold mt-1 truncate">
-                        12th Main Road, Indiranagar
-                      </h4>
-                      <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
-                        Near Corner House • Left lane sunken
-                      </p>
-                    </div>
+              {hazardsError && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{hazardsError}</p>}
+              {!hazardsError && hazards.length === 0 && <p className="rounded-xl bg-surface-container-low p-3 text-sm text-secondary">No matching hazard reports yet.</p>}
+              {hazards.map((hazard) => (
+                <article key={hazard._id} className="rounded-2xl bg-surface-container-lowest p-4 shadow-sm border border-outline-variant/10">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{hazard.severity} Ãƒâ€šÃ‚Â· {hazard.hazardType.replaceAll('_', ' ')}</span>
+                    <span className="text-xs capitalize text-secondary">{hazard.status}</span>
                   </div>
-                  <div className="flex items-center justify-between pt-2 bg-surface-container-low/60 rounded-xl px-3 py-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="material-symbols-outlined text-[16px] text-emerald-700">verified</span>
-                      <span className="font-label-sm text-label-sm text-on-surface-variant truncate">
-                        {confirmedCard1 ? '19 Verified' : '18 Verified'} • BBMP Notified
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setConfirmedCard1(true);
-                        showToast('Thanks for confirming! +15 Civic XP added.', 'thumb_up');
-                      }}
-                      className={`flex items-center gap-1 font-label-sm text-label-sm font-semibold shrink-0 cursor-pointer ${
-                        confirmedCard1 ? 'text-emerald-600' : 'text-primary hover:text-surface-tint'
-                      }`}
-                    >
-                      <span className="material-symbols-outlined text-[16px]">
-                        {confirmedCard1 ? 'check_circle' : 'thumb_up'}
-                      </span>
-                      <span>{confirmedCard1 ? 'Verified!' : 'Confirm'}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
+                  <h4 className="mt-2 font-semibold text-on-surface">{[hazard.roadName, hazard.area].filter(Boolean).join(', ') || 'Road location'}</h4>
+                  <p className="mt-1 text-sm text-on-surface-variant">{hazard.description}</p>
+                </article>
+              ))}
 
-              {/* Card 2: Unmarked Speed Breaker */}
-              {(activeFilter === 'All (12)' || activeFilter === 'Roadwork') && (
-                <div className="flex flex-col p-4 rounded-2xl bg-surface-container-lowest shadow-sm hover:shadow-md transition-shadow gap-space-sm border border-outline-variant/10">
-                  <div className="flex items-start gap-3">
-                    <div className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-surface-container">
-                      <img
-                        className="w-full h-full object-cover"
-                        alt="Unpainted speed hump"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCIIa_DZUQPjMrpc5i_NVCuO9OTiSUuvig-LZ5j6wkXyqYRSwhuYrL4sfc78ZQpSXl4jrq-q45wggBt8GrxoAfkF1bCHiZeOTHlGWAJfartTKLFuXF2p3PK-ZsgcYq5-uWxseBJwvdgFETvu9a6Kwtne8kdY1ia5wSvmfuNqmEXSxnfyqGAn6SWiYnQAKiwHweU5F85_jRGxgSRn-aRuOfhwDXbP71n3cLu1S4RyN_2HKq_HjPfhPl0"
-                      />
-                    </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-800 font-label-sm text-label-sm font-semibold">
-                          <span className="material-symbols-outlined text-[13px] text-orange-600">report_problem</span>
-                          Unmarked Hump
-                        </span>
-                        <span className="font-label-md text-label-md text-on-surface-variant font-semibold shrink-0">
-                          450m away
-                        </span>
-                      </div>
-                      <h4 className="font-headline-sm text-sm text-on-surface font-bold mt-1 truncate">
-                        Sony World Signal, Koramangala
-                      </h4>
-                      <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
-                        Zero reflective paint • Critical night risk
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between pt-2 bg-surface-container-low/60 rounded-xl px-3 py-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="material-symbols-outlined text-[16px] text-on-tertiary-container">nightlight</span>
-                      <span className="font-label-sm text-label-sm text-on-surface-variant truncate">
-                        Caution • High collision risk after sunset
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => navigate('/ride/start')}
-                      className="flex items-center gap-1 text-primary hover:text-surface-tint font-label-sm text-label-sm font-semibold shrink-0 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">navigation</span>
-                      <span>Bypass</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Card 3: Waterlogged Crater Patch */}
-              {(activeFilter === 'All (12)' || activeFilter === 'Waterlogging') && (
-                <div className="flex flex-col p-4 rounded-2xl bg-surface-container-lowest shadow-sm hover:shadow-md transition-shadow gap-space-sm border border-outline-variant/10">
-                  <div className="flex items-start gap-3">
-                    <div className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-surface-container">
-                      <img
-                        className="w-full h-full object-cover"
-                        alt="Waterlogged hole"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCAyiKOKJZ3AEHTsSOJu5XwtxTPE-k48HWcKJHskBnKeixOQy1G8XjJenOS-WzJxN_maNq9yTdPc9_6QeL2N5k6jZeyKwUPiDO_aughSa26j4VKr8ouhHLymaCTZgEIrMiWRtPF1tx3oAK5HdfAshcuLSADDKZl4cW1cslc8CIHjW78FoMPz1jrIQHUaoiqX3I8IsRT-xRwcbBDadYLyGc7B1LdvnllE658JqYl3dgQFdrYiae7joju"
-                      />
-                    </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-900 font-label-sm text-label-sm font-semibold">
-                          <span className="material-symbols-outlined text-[13px] text-blue-600">water</span>
-                          Waterlogged Hole
-                        </span>
-                        <span className="font-label-md text-label-md text-on-surface-variant font-semibold shrink-0">
-                          1.2 km away
-                        </span>
-                      </div>
-                      <h4 className="font-headline-sm text-sm text-on-surface font-bold mt-1 truncate">
-                        Silk Board Down-Ramp
-                      </h4>
-                      <p className="font-body-sm text-body-sm text-on-surface-variant truncate">
-                        Reported 25 mins ago by Traffic Marshall
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between pt-2 bg-surface-container-low/60 rounded-xl px-3 py-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="material-symbols-outlined text-[16px] text-error">schedule</span>
-                      <span className="font-label-sm text-label-sm text-on-surface-variant truncate">
-                        Slow traffic moving at 8 km/h
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => showToast('Community alert broadcasted to 420 commuters', 'share')}
-                      className="flex items-center gap-1 text-primary hover:text-surface-tint font-label-sm text-label-sm font-semibold shrink-0 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">share</span>
-                      <span>Alert</span>
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -377,7 +227,7 @@ export default function HomeScreen() {
                   <span className="material-symbols-outlined text-[20px]">circle</span>
                 </div>
                 <span className="font-label-sm text-label-sm font-bold mt-0.5">Pothole</span>
-                <span className="font-body-sm text-[10px] text-on-surface-variant leading-none">GPS Locked</span>
+                <span className="font-body-sm text-[10px] text-on-surface-variant leading-none">Location requested on submit</span>
               </button>
 
               <button
@@ -404,7 +254,7 @@ export default function HomeScreen() {
             </div>
           </div>
 
-          {/* Civic Community Pulse Banner */}
+          {/* Current report count from the API response */}
           <div className="rounded-2xl bg-secondary-container/40 p-3.5 flex items-center justify-between gap-3 mt-1 border border-outline-variant/10">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-xl bg-primary text-on-primary flex items-center justify-center shrink-0">
@@ -412,23 +262,17 @@ export default function HomeScreen() {
               </div>
               <div className="flex flex-col min-w-0">
                 <span className="font-label-md text-label-md text-on-secondary-container font-semibold truncate">
-                  Civic Action Drive
+                  Recent reports
                 </span>
                 <span className="font-body-sm text-body-sm text-secondary truncate">
-                  BBMP asphalt team dispatched to 100ft Rd
+                  {hazards.length} matching reports loaded from SafeRoute.
                 </span>
               </div>
+              </div>
             </div>
-            <button
-              onClick={() => showToast('Dispatch Tracking: Team 14 arriving at 12th Main junction in 15 mins.', 'info')}
-              className="font-label-sm text-label-sm text-primary font-bold px-2 py-1 rounded bg-surface-container-lowest shadow-sm shrink-0 cursor-pointer hover:bg-surface-container"
-            >
-              Track
-            </button>
-          </div>
-        </div>
-      </main>
+          </div>      </main>
 
+      <AssistantChat />
       <BottomNav />
       <Toast message={toastMessage} icon={toastIcon} isOpen={isToastOpen} onClose={() => setIsToastOpen(false)} />
     </div>

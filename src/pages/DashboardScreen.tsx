@@ -1,10 +1,37 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
 import Toast from '../components/Toast.tsx';
+import AssistantChat from '../components/AssistantChat.tsx';
+import { apiRequest } from '../lib/api';
+
+interface AnalyticsData {
+  totalHazards: number;
+  hazardsByDay: Array<{ date: string; count: number }>;
+  topHazardZones: Array<{ zone: string; area: string; roadName: string; count: number }>;
+  severityBreakdown: Array<{ severity: string; count: number }>;
+}
+
+interface HazardFeedItem {
+  _id: string;
+  hazardType: string;
+  severity: string;
+  description: string;
+  area?: string;
+  roadName?: string;
+  status: string;
+  createdAt: string;
+}
 
 export default function DashboardScreen() {
-  const [selectedMonth, setSelectedMonth] = useState('Oct');
+  const [dateRange, setDateRange] = useState('7');
+  const [hazardType, setHazardType] = useState('');
+  const [severity, setSeverity] = useState('');
+  const [area, setArea] = useState('');
+  const [summary, setSummary] = useState<AnalyticsData | null>(null);
+  const [recentHazards, setRecentHazards] = useState<HazardFeedItem[]>([]);
+  const [analyticsError, setAnalyticsError] = useState('');
+  const [refreshCount, setRefreshCount] = useState(0);
   const [toastMessage, setToastMessage] = useState('');
   const [isToastOpen, setIsToastOpen] = useState(false);
 
@@ -13,14 +40,31 @@ export default function DashboardScreen() {
     setIsToastOpen(true);
   };
 
-  const monthlyData = [
-    { month: 'May', count: 420, height: '40%' },
-    { month: 'Jun', count: 780, height: '70%' },
-    { month: 'Jul', count: 1150, height: '95%' }, // Peak monsoon
-    { month: 'Aug', count: 920, height: '80%' },
-    { month: 'Sep', count: 640, height: '55%' },
-    { month: 'Oct', count: 490, height: '45%' },
-  ];
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (dateRange !== 'all') {
+      const end = new Date();
+      const start = new Date(Date.now() - Number(dateRange) * 24 * 60 * 60 * 1000);
+      params.set('startDate', start.toISOString().slice(0, 10));
+      params.set('endDate', end.toISOString().slice(0, 10));
+    }
+    if (hazardType) params.set('hazardType', hazardType);
+    if (severity) params.set('severity', severity);
+    if (area.trim()) params.set('area', area.trim());
+    apiRequest<AnalyticsData>(`/analytics/summary?${params.toString()}`)
+      .then((result) => { setSummary(result); setAnalyticsError(''); })
+      .catch((error) => setAnalyticsError(error instanceof Error ? error.message : 'Could not load analytics.'));
+    const hazardParams = new URLSearchParams(params);
+    hazardParams.set('limit', '3');
+    hazardParams.set('page', '1');
+    apiRequest<{ hazards: HazardFeedItem[] }>(`/hazards?${hazardParams.toString()}`)
+      .then(({ hazards }) => setRecentHazards(hazards))
+      .catch((error) => setAnalyticsError(error instanceof Error ? error.message : 'Could not load recent reports.'));
+  }, [dateRange, hazardType, severity, area, refreshCount]);
+
+  const highCount = summary?.severityBreakdown.find((item) => item.severity === 'high')?.count || 0;
+  const chartRows = summary?.hazardsByDay.slice(-7) || [];
+  const chartMax = Math.max(1, ...chartRows.map((item) => item.count));
 
   return (
     <div className="bg-background font-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-secondary-container">
@@ -37,16 +81,38 @@ export default function DashboardScreen() {
               </span>
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-label-sm text-xs font-semibold">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-                BBMP Feed Active
+                MongoDB Reports
               </span>
             </div>
             <h1 className="font-headline-lg-mobile text-2xl sm:text-3xl text-primary font-bold tracking-tight">
               Road Health Analytics
             </h1>
             <p className="font-body-sm text-secondary">
-              Live crowd-sourced road conditions and municipal repair tracking across 198 wards.
+              Reports submitted to SafeRoute. Date, hazard, severity, and area filters run on the server.
             </p>
           </div>
+
+          <section className="grid grid-cols-3 gap-2 rounded-2xl bg-surface-container-low p-3">
+            <label className="text-xs font-semibold text-secondary">Date range
+              <select value={dateRange} onChange={(event) => setDateRange(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant bg-white p-2 text-sm text-on-surface">
+                <option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="all">All time</option>
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-secondary">Hazard type
+              <select value={hazardType} onChange={(event) => setHazardType(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant bg-white p-2 text-sm text-on-surface">
+                <option value="">All types</option><option value="pothole">Potholes</option><option value="waterlogging">Waterlogging</option><option value="open_manhole">Open manholes</option><option value="speed_breaker">Speed breakers</option><option value="other">Other</option>
+              </select>
+            </label>
+            <label className="text-xs font-semibold text-secondary">Severity
+              <select value={severity} onChange={(event) => setSeverity(event.target.value)} className="mt-1 w-full rounded-lg border border-outline-variant bg-white p-2 text-sm text-on-surface">
+                <option value="">All levels</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+              </select>
+            </label>
+            <label className="col-span-3 text-xs font-semibold text-secondary">Area or road
+              <input value={area} onChange={(event) => setArea(event.target.value)} placeholder="All areas" className="mt-1 w-full rounded-lg border border-outline-variant bg-white p-2 text-sm text-on-surface" />
+            </label>
+          </section>
+          {analyticsError && <p className="rounded-xl bg-red-50 p-3 text-sm text-red-700" role="alert">{analyticsError}</p>}
 
           {/* Civic Safety Score Hero Card */}
           <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary-container to-primary text-on-primary p-5 shadow-xl shadow-primary-container/20">
@@ -55,18 +121,13 @@ export default function DashboardScreen() {
             <div className="relative z-10 flex items-center justify-between">
               <div className="flex flex-col gap-1">
                 <span className="font-label-md text-xs text-primary-fixed uppercase tracking-wider font-semibold">
-                  Bengaluru Safety Index
+                  Citywide Safety Index
                 </span>
                 <div className="flex items-baseline gap-2">
-                  <span className="font-display text-4xl font-extrabold text-on-primary">84</span>
-                  <span className="text-sm text-primary-fixed">/100</span>
-                  <span className="inline-flex items-center text-xs text-emerald-300 font-bold ml-1">
-                    <span className="material-symbols-outlined text-sm">trending_up</span>
-                    +6% this week
-                  </span>
+                  <span className="font-display text-2xl font-extrabold text-on-primary">Not calculated</span>
                 </div>
                 <p className="font-body-sm text-xs text-on-primary-container mt-1">
-                  Ward 112 (Indiranagar) ranked #3 in road quality this month
+                  The API reports hazards, but does not calculate a citywide safety score or ward ranking.
                 </p>
               </div>
 
@@ -84,12 +145,12 @@ export default function DashboardScreen() {
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                     fill="none"
                     stroke="currentColor"
-                    strokeDasharray="84, 100"
+                    strokeDasharray="0, 100"
                     strokeLinecap="round"
                     strokeWidth="3.5"
                   />
                 </svg>
-                <span className="absolute font-display text-sm font-bold text-on-primary">84%</span>
+                <span className="absolute font-display text-xs font-bold text-on-primary">N/A</span>
               </div>
             </div>
           </div>
@@ -97,52 +158,49 @@ export default function DashboardScreen() {
           {/* City-wide Road Health Stats (3 Grid Cards) */}
           <div className="grid grid-cols-3 gap-2.5">
             <div className="p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10 flex flex-col">
-              <span className="font-label-sm text-[11px] text-secondary font-semibold">Total Craters</span>
-              <span className="font-display text-xl font-bold text-on-surface mt-1">1,428</span>
-              <span className="font-body-sm text-[10px] text-secondary mt-0.5">Reported</span>
+              <span className="font-label-sm text-[11px] text-secondary font-semibold">Total reports</span>
+              <span className="font-display text-xl font-bold text-on-surface mt-1">{summary?.totalHazards ?? 'â€”'}</span>
+              <span className="font-body-sm text-[10px] text-secondary mt-0.5">Filtered reports</span>
             </div>
 
             <div className="p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10 flex flex-col">
-              <span className="font-label-sm text-[11px] text-secondary font-semibold">Resolved</span>
-              <span className="font-display text-xl font-bold text-emerald-700 mt-1">914</span>
-              <span className="font-body-sm text-[10px] text-emerald-600 mt-0.5 font-medium">64% Fixed</span>
+              <span className="font-label-sm text-[11px] text-secondary font-semibold">Low severity</span>
+              <span className="font-display text-xl font-bold text-emerald-700 mt-1">{summary?.severityBreakdown.find((item) => item.severity === 'low')?.count ?? 'â€”'}</span>
+              <span className="font-body-sm text-[10px] text-emerald-600 mt-0.5 font-medium">Low severity</span>
             </div>
 
             <div className="p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10 flex flex-col">
               <span className="font-label-sm text-[11px] text-secondary font-semibold">Hotspots</span>
-              <span className="font-display text-xl font-bold text-error mt-1">42</span>
-              <span className="font-body-sm text-[10px] text-error mt-0.5 font-medium">High Risk</span>
+              <span className="font-display text-xl font-bold text-error mt-1">{highCount}</span>
+              <span className="font-body-sm text-[10px] text-error mt-0.5 font-medium">High severity</span>
             </div>
           </div>
 
-          {/* Monthly Pothole Activity Chart */}
+          {/* Filtered Hazard Trend Chart */}
           <div className="bg-surface-container-low rounded-3xl p-4 shadow-sm flex flex-col gap-3 border border-outline-variant/10">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-headline-sm text-sm font-bold text-primary">Monthly Incident Reports</h3>
-                <p className="font-body-sm text-xs text-secondary">Monsoon surge vs repair cycles</p>
+                <h3 className="font-headline-sm text-sm font-bold text-primary">Hazard Reports by Day</h3>
+                <p className="font-body-sm text-xs text-secondary">Updated from filtered MongoDB results</p>
               </div>
               <span className="font-label-sm text-xs px-2.5 py-1 rounded-full bg-surface-container-high text-primary font-semibold">
-                2024
+                {dateRange === 'all' ? 'All time' : `Last ${dateRange} days`}
               </span>
             </div>
 
             {/* Custom Bar Chart */}
             <div className="flex items-end justify-between h-40 pt-4 px-2">
-              {monthlyData.map((item) => {
-                const isSelected = selectedMonth === item.month;
+              {!chartRows.length && <p className="w-full self-center text-center text-sm text-secondary">No daily reports for these filters.</p>}
+              {chartRows.map((item) => {
+                const label = new Date(`${item.date}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short' });
                 return (
                   <div
-                    key={item.month}
-                    onClick={() => {
-                      setSelectedMonth(item.month);
-                      showToast(`${item.month} 2024: ${item.count} road hazards recorded`);
-                    }}
-                    className="flex flex-col items-center gap-1.5 flex-1 cursor-pointer group"
+                    key={item.date}
+                    className="flex flex-col items-center gap-1.5 flex-1 group"
                   >
                     <span
                       className={`text-[10px] font-semibold transition-opacity ${
-                        isSelected ? 'text-primary font-bold' : 'text-secondary opacity-0 group-hover:opacity-100'
+                        'text-secondary opacity-0 group-hover:opacity-100'
                       }`}
                     >
                       {item.count}
@@ -150,160 +208,65 @@ export default function DashboardScreen() {
                     <div className="w-8 max-w-full h-28 bg-surface-container-high rounded-xl flex items-end overflow-hidden p-0.5">
                       <div
                         className={`w-full rounded-lg transition-all duration-300 ${
-                          isSelected
-                            ? 'bg-tertiary-fixed-dim shadow-md'
-                            : item.month === 'Jul'
-                            ? 'bg-error/80'
-                            : 'bg-primary/80 group-hover:bg-primary'
+                          'bg-primary/80 group-hover:bg-primary'
                         }`}
-                        style={{ height: item.height }}
+                        style={{ height: `${Math.max(8, (item.count / chartMax) * 100)}%` }}
                       ></div>
                     </div>
                     <span
                       className={`text-xs font-semibold ${
-                        isSelected ? 'text-primary font-bold' : 'text-secondary'
+                        'text-secondary'
                       }`}
                     >
-                      {item.month}
+                      {label}
                     </span>
                   </div>
                 );
               })}
             </div>
-            <div className="flex items-center justify-center gap-4 text-xs text-secondary pt-1 border-t border-outline-variant/10">
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded bg-primary"></span> Routine
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded bg-error"></span> Monsoon Peak
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded bg-tertiary-fixed-dim"></span> Selected
-              </span>
-            </div>
+            <p className="border-t border-outline-variant/10 pt-2 text-center text-xs text-secondary">Each bar shows reports created on that date.</p>
           </div>
 
-          {/* Live Citizen Hazard Feed */}
+          {/* Recent reports are loaded from the API using the current dashboard filters. */}
           <div className="flex flex-col gap-space-sm">
             <div className="flex items-center justify-between">
-              <h3 className="font-headline-sm text-headline-sm text-primary font-bold">
-                Live Citizen Hazard Feed
-              </h3>
-              <button
-                onClick={() => showToast('Refreshed latest BBMP dispatch tickets')}
-                className="font-label-sm text-surface-tint font-semibold hover:underline cursor-pointer flex items-center gap-1"
-              >
+              <h3 className="font-headline-sm text-headline-sm text-primary font-bold">Recent Citizen Hazard Reports</h3>
+              <button onClick={() => { setRefreshCount((value) => value + 1); showToast('Refreshed reports and analytics from MongoDB.'); }} className="font-label-sm text-surface-tint font-semibold hover:underline cursor-pointer flex items-center gap-1">
                 <span className="material-symbols-outlined text-sm">refresh</span> Refresh
               </button>
             </div>
-
             <div className="flex flex-col gap-2.5">
-              {/* Ticket 1 */}
-              <div className="p-3.5 rounded-2xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/10">
-                <div className="flex items-center justify-between">
-                  <span className="font-label-sm text-xs font-mono font-semibold text-secondary">
-                    TICKET #BBMP-8924
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 font-label-sm text-xs font-semibold">
-                    In Progress
-                  </span>
-                </div>
-                <h4 className="font-headline-sm text-sm font-bold text-on-surface">
-                  100ft Road, near 12th Main junction, Indiranagar
-                </h4>
-                <p className="font-body-sm text-xs text-secondary">
-                  Deep crater (14cm) reported by Ananya Rao • BBMP Asphalt crew dispatched
-                </p>
-                <div className="flex items-center justify-between text-xs text-secondary pt-1 border-t border-outline-variant/10">
-                  <span>14 mins ago</span>
-                  <span className="font-semibold text-primary">28 Commuter Upvotes</span>
-                </div>
-              </div>
-
-              {/* Ticket 2 */}
-              <div className="p-3.5 rounded-2xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/10">
-                <div className="flex items-center justify-between">
-                  <span className="font-label-sm text-xs font-mono font-semibold text-secondary">
-                    TICKET #BBMP-8891
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 font-label-sm text-xs font-semibold">
-                    Resolved
-                  </span>
-                </div>
-                <h4 className="font-headline-sm text-sm font-bold text-on-surface">
-                  Sony World Junction, Koramangala
-                </h4>
-                <p className="font-body-sm text-xs text-secondary">
-                  Unmarked speed hump painted with thermoplastic reflective stripes
-                </p>
-                <div className="flex items-center justify-between text-xs text-secondary pt-1 border-t border-outline-variant/10">
-                  <span>2 hours ago</span>
-                  <span className="font-semibold text-emerald-700">Closed & Verified</span>
-                </div>
-              </div>
-
-              {/* Ticket 3 */}
-              <div className="p-3.5 rounded-2xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/10">
-                <div className="flex items-center justify-between">
-                  <span className="font-label-sm text-xs font-mono font-semibold text-secondary">
-                    TICKET #BBMP-8872
-                  </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-900 font-label-sm text-xs font-semibold">
-                    Investigating
-                  </span>
-                </div>
-                <h4 className="font-headline-sm text-sm font-bold text-on-surface">
-                  Silk Board Down-Ramp
-                </h4>
-                <p className="font-body-sm text-xs text-secondary">
-                  Waterlogging and collapsed storm-water drain barrier under survey
-                </p>
-                <div className="flex items-center justify-between text-xs text-secondary pt-1 border-t border-outline-variant/10">
-                  <span>3 hours ago</span>
-                  <span className="font-semibold text-primary">45 Commuter Alerts</span>
-                </div>
-              </div>
+              {recentHazards.length ? recentHazards.map((hazard) => (
+                <article key={hazard._id} className="p-3.5 rounded-2xl bg-surface-container-low flex flex-col gap-2 border border-outline-variant/10">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-label-sm text-xs font-semibold text-secondary">{hazard.hazardType.replaceAll('_', ' ')} · {hazard.severity}</span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-surface-container-high text-on-surface font-label-sm text-xs">{hazard.status}</span>
+                  </div>
+                  <h4 className="font-headline-sm text-sm font-bold text-on-surface">{[hazard.roadName, hazard.area].filter(Boolean).join(', ') || 'Unspecified area'}</h4>
+                  <p className="font-body-sm text-xs text-secondary">{hazard.description}</p>
+                  <time className="text-xs text-secondary" dateTime={hazard.createdAt}>{new Date(hazard.createdAt).toLocaleString()}</time>
+                </article>
+              )) : <p className="text-sm text-secondary">No reports match these filters.</p>}
             </div>
           </div>
-
-          {/* Ward Leaderboard */}
+          {/* Top hazard zones */}
           <div className="bg-surface-container-low rounded-3xl p-4 shadow-sm flex flex-col gap-3 border border-outline-variant/10">
-            <h3 className="font-headline-sm text-sm font-bold text-primary">Bengaluru Ward Quality Ranking</h3>
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-lowest">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-6 h-6 rounded-full bg-tertiary-fixed-dim text-on-tertiary-fixed font-bold text-xs flex items-center justify-center">
-                    1
-                  </span>
-                  <span className="font-label-md font-bold text-on-surface">Indiranagar (Ward 112)</span>
+            <h3 className="font-headline-sm text-sm font-bold text-primary">Top Hazard Zones</h3>
+            {summary?.topHazardZones.length ? summary.topHazardZones.map((zone, index) => (
+              <div key={`${zone.area}-${zone.roadName}-${index}`} className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-lowest p-2.5">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="w-6 h-6 rounded-full bg-surface-container-high text-secondary font-bold text-xs flex items-center justify-center">{index + 1}</span>
+                  <span className="font-label-md font-bold text-on-surface truncate">{zone.zone || zone.area || zone.roadName || 'Unspecified area'}</span>
                 </div>
-                <span className="font-label-md font-extrabold text-emerald-700">88 Score</span>
+                <span className="font-label-md font-extrabold text-error shrink-0">{zone.count} reports</span>
               </div>
-
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-lowest">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-6 h-6 rounded-full bg-surface-container-high text-secondary font-bold text-xs flex items-center justify-center">
-                    2
-                  </span>
-                  <span className="font-label-md font-bold text-on-surface">Koramangala (Ward 151)</span>
-                </div>
-                <span className="font-label-md font-extrabold text-primary">76 Score</span>
-              </div>
-
-              <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-lowest">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-6 h-6 rounded-full bg-surface-container-high text-secondary font-bold text-xs flex items-center justify-center">
-                    3
-                  </span>
-                  <span className="font-label-md font-bold text-on-surface">Whitefield (Ward 84)</span>
-                </div>
-                <span className="font-label-md font-extrabold text-amber-700">62 Score</span>
-              </div>
-            </div>
+            )) : <p className="text-sm text-secondary">No hazard zones match these filters.</p>}
           </div>
+
         </div>
       </main>
 
+      <AssistantChat />
       <BottomNav />
       <Toast message={toastMessage} icon="check_circle" isOpen={isToastOpen} onClose={() => setIsToastOpen(false)} />
     </div>

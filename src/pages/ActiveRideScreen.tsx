@@ -3,13 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
 import Toast from '../components/Toast.tsx';
+import { apiRequest } from '../lib/api';
 
 export default function ActiveRideScreen() {
   const navigate = useNavigate();
 
-  // Active simulated telemetry
-  const [secondsElapsed, setSecondsElapsed] = useState(860); // Starts at 14:20
-  const [currentSpeed, setCurrentSpeed] = useState(34);
+  const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [voiceActive, setVoiceActive] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -19,10 +18,10 @@ export default function ActiveRideScreen() {
   const [showToast, setShowToast] = useState(false);
 
   useEffect(() => {
+    const startTime = Date.parse(localStorage.getItem('saferoute_active_ride_start_time') || '');
+    if (!Number.isNaN(startTime)) setSecondsElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
     const timer = setInterval(() => {
-      setSecondsElapsed((s) => s + 1);
-      // Small realistic speed jitter (32 - 36 km/h)
-      setCurrentSpeed(34 + Math.floor(Math.sin(Date.now() / 1000) * 3));
+      if (!Number.isNaN(startTime)) setSecondsElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
     }, 1000);
 
     return () => clearInterval(timer);
@@ -35,18 +34,39 @@ export default function ActiveRideScreen() {
   };
 
   const triggerQuickTag = (type: string) => {
-    setToastMessage(`Hazard Pinned to BBMP Grid: ${type}`);
-    setToastSubtitle('Geo-tagged at Koramangala 80ft Road');
+    setToastMessage(`${type} preview is not connected to live location or routing.`);
+    setToastSubtitle('Use the report form to save a hazard with your device location.');
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
   };
 
-  const handleConfirmSave = () => {
+  const handleConfirmSave = async () => {
     setIsSaving(true);
-    setTimeout(() => {
+    try {
+      const rideId = localStorage.getItem('saferoute_active_ride_id');
+      if (!rideId) throw new Error('No active ride session was found. Start a new ride first.');
+      await apiRequest(`/rides/${rideId}`, {
+        method: 'PATCH',
+        body: {
+          distanceKm: 0,
+          durationMinutes: Math.round(secondsElapsed / 60),
+          hazardsDetectedCount: 0,
+          hazardsReportedCount: Number(localStorage.getItem('saferoute_active_ride_reports') || 0),
+        },
+      });
+      localStorage.setItem('saferoute_summary_ride_id', rideId);
+      localStorage.removeItem('saferoute_active_ride_id');
+      localStorage.removeItem('saferoute_active_ride_start_time');
+      localStorage.removeItem('saferoute_active_ride_reports');
       setIsModalOpen(false);
       navigate('/ride/summary');
-    }, 800);
+    } catch (error) {
+      setToastMessage(error instanceof Error ? error.message : 'Unable to save this ride.');
+      setToastSubtitle('Check your connection and try again.');
+      setShowToast(true);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -130,7 +150,10 @@ export default function ActiveRideScreen() {
               </circle>
             </svg>
 
-            {/* Live Vehicle GPS Arrow Anchor */}
+            <div className="absolute top-20 left-3 right-3 z-30 rounded-xl bg-black/70 px-3 py-2 text-center text-xs font-semibold text-white">
+              Illustrative map preview; live GPS, speed, and routing are not connected.
+            </div>
+            {/* Illustrative vehicle marker */}
             <div className="absolute left-[183px] top-[508px] flex items-center justify-center pointer-events-none z-20">
               <div className="relative flex items-center justify-center w-11 h-11 bg-primary-container rounded-full shadow-xl ring-4 ring-primary-fixed-dim/40">
                 <span
@@ -233,8 +256,8 @@ export default function ActiveRideScreen() {
                 <div className="flex flex-col items-center flex-1 px-1">
                   <span className="font-label-sm text-secondary uppercase font-semibold">Distance</span>
                   <div className="flex items-baseline gap-0.5 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-on-surface">4.6</span>
-                    <span className="font-label-sm text-secondary font-semibold">km</span>
+                    <span className="font-display text-headline-sm font-extrabold text-on-surface">—</span>
+                    <span className="font-label-sm text-secondary font-semibold">GPS off</span>
                   </div>
                 </div>
                 <div className="w-px h-7 bg-outline-variant/50"></div>
@@ -257,8 +280,8 @@ export default function ActiveRideScreen() {
                     Hazards
                   </span>
                   <div className="flex items-baseline gap-1 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-error">3</span>
-                    <span className="font-label-sm text-error font-semibold">Alerts</span>
+                    <span className="font-display text-headline-sm font-extrabold text-error">0</span>
+                    <span className="font-label-sm text-error font-semibold">Auto detect off</span>
                   </div>
                 </div>
                 <div className="w-px h-7 bg-outline-variant/50"></div>
@@ -268,9 +291,9 @@ export default function ActiveRideScreen() {
                   <span className="font-label-sm text-secondary uppercase font-semibold">Speed</span>
                   <div className="flex items-baseline gap-0.5 mt-0.5">
                     <span className="font-display text-headline-sm font-extrabold text-primary-container">
-                      {currentSpeed}
+                      —
                     </span>
-                    <span className="font-label-sm text-secondary font-semibold">km/h</span>
+                    <span className="font-label-sm text-secondary font-semibold">GPS off</span>
                   </div>
                 </div>
               </div>
@@ -423,7 +446,7 @@ export default function ActiveRideScreen() {
                     </div>
                     <div>
                       <h3 className="font-headline-sm font-bold text-on-surface">Finish Ride & Save Stats?</h3>
-                      <p className="font-body-sm text-secondary">Logged 4.6 km and 3 civic hazard detections.</p>
+                      <p className="font-body-sm text-secondary">Distance and automatic hazard detection are not available without device tracking.</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2.5">

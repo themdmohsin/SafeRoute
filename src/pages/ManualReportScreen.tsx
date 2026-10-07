@@ -2,15 +2,15 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import Toast from '../components/Toast.tsx';
+import { apiRequest } from '../lib/api';
 
 export default function ManualReportScreen() {
   const navigate = useNavigate();
   const [hazardType, setHazardType] = useState('pothole');
-  const [severity, setSeverity] = useState('high');
+  const [severity, setSeverity] = useState('');
   const [notes, setNotes] = useState('');
-  const [realtimeAlert, setRealtimeAlert] = useState(true);
-  const [hasPhoto, setHasPhoto] = useState(true);
-  const [photoFileName, setPhotoFileName] = useState('Pothole_Indiranagar_100ft.jpg');
+  const [hasPhoto, setHasPhoto] = useState(false);
+  const [photoFileName, setPhotoFileName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [toastMessage, setToastMessage] = useState('');
@@ -23,18 +23,44 @@ export default function ManualReportScreen() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-
-    setTimeout(() => {
-      setToastMessage('Hazard Ticket #BBMP-8924 Logged! Nearby commuters alerted.');
+    try {
+      if (!navigator.geolocation) throw new Error('This browser does not provide device location.');
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error('Allow location access to submit a report.')), { enableHighAccuracy: true, timeout: 10000 });
+      });
+      const result = await apiRequest<{ hazard: { id: string }; classification?: { aiSuggested: boolean; severity: string } | null }>('/hazards', {
+        method: 'POST',
+        body: {
+          hazardType: hazardType === 'cave_in' ? 'other' : hazardType,
+          ...(severity ? { severity } : {}),
+          description: notes.trim() || `${hazardType.replace('_', ' ')} hazard reported by a commuter.`,
+          location: { type: 'Point', coordinates: [position.coords.longitude, position.coords.latitude] },
+          roadName: 'Device location',
+          area: 'Bengaluru',
+          photoUrl: null,
+          source: 'manual',
+        },
+      });
+      const activeRideId = localStorage.getItem('saferoute_active_ride_id');
+      if (activeRideId) {
+        const reportCount = Number(localStorage.getItem('saferoute_active_ride_reports') || 0);
+        localStorage.setItem('saferoute_active_ride_reports', String(reportCount + 1));
+      }
+      const classification = result.classification?.aiSuggested
+        ? ` AI suggested ${result.classification.severity} severity.`
+        : '';
+      setToastMessage(`Hazard report saved.${classification}`);
       setIsToastOpen(true);
-      setTimeout(() => {
-        setIsSubmitting(false);
-        navigate('/ride/active');
-      }, 1200);
-    }, 1000);
+      window.setTimeout(() => navigate('/ride/active'), 900);
+    } catch (error) {
+      setToastMessage(error instanceof Error ? error.message : 'Unable to submit hazard report.');
+      setIsToastOpen(true);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -48,30 +74,30 @@ export default function ManualReportScreen() {
           <div className="pt-space-sm flex flex-col gap-space-xs">
             <div className="flex items-center gap-space-xs">
               <span className="inline-flex items-center px-space-sm py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-label-sm text-label-sm font-semibold">
-                INCIDENT DISPATCH
+                SAFEROUTE REPORT
               </span>
-              <span className="text-secondary font-body-sm text-body-sm">• BBMP Ward 112</span>
+
             </div>
             <h2 className="font-headline-lg-mobile text-headline-lg-mobile text-primary font-bold tracking-tight">
               Report Road Hazard
             </h2>
             <p className="font-body-sm text-body-sm text-secondary">
-              BBMP Civic Telemetry & Community Warning Network
+              Reports are stored in SafeRoute. Municipal dispatch is not connected.
             </p>
           </div>
 
-          {/* Auto-locked GPS Geofence Tile */}
+          {/* Device location */}
           <div className="bg-surface-container-low p-space-md rounded-2xl shadow-sm flex flex-col gap-space-sm relative overflow-hidden border border-outline-variant/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-space-xs">
                 <span className="w-2.5 h-2.5 rounded-full bg-tertiary-fixed-dim animate-pulse"></span>
-                <span className="font-label-sm text-label-sm text-on-tertiary-fixed-variant uppercase tracking-wider font-semibold">
-                  Auto-Locked GPS
+              <span className="font-label-sm text-label-sm text-on-tertiary-fixed-variant uppercase tracking-wider font-semibold">
+                  Device location captured on submit
                 </span>
               </div>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-highest text-primary font-label-sm text-label-sm font-semibold">
                 <span className="material-symbols-outlined text-[14px]">lock</span>
-                <span>Accurate (±2m)</span>
+                <span>Accurate (Ãƒâ€šÃ‚Â±2m)</span>
               </span>
             </div>
             <div className="flex items-start gap-space-sm">
@@ -80,23 +106,16 @@ export default function ManualReportScreen() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-headline-sm text-headline-sm text-on-surface truncate font-bold">
-                  100ft Road, near 12th Main junction
+                  Device coordinates
                 </p>
                 <p className="font-body-sm text-body-sm text-secondary truncate">
-                  Indiranagar, Bengaluru, KA 560038
+                  Captured from your browser after consent
                 </p>
                 <p className="font-label-md text-label-md text-surface-tint mt-0.5 font-mono font-medium">
-                  12.9716° N, 77.6412° E
+                  Stored in GeoJSON longitude, latitude order
                 </p>
               </div>
             </div>
-            {/* Mini context map snippet */}
-            <div
-              className="w-full h-20 rounded-xl bg-cover bg-center mt-1 overflow-hidden opacity-90 shadow-inner"
-              style={{
-                backgroundImage: `url('https://lh3.googleusercontent.com/aida-public/AB6AXuA34YzzfBZ-he-17o-FgBvTVYda5YSJ2R-3qoLkh2YgtlWrZ7pSgFmXqRkHmqmQbfPGQBRskoGsgTjODGgbGfxSlJE5oCIoSAu2D1Brh9TrNJ-ndnMAa6U_Y-ZZ0ODc0iW8s-_jBFPcyV0EH2SyDh7e3pQnYoUfkdHtD2ongvzicOS1ziR6cSXzmpII5pEkbLdlEgK_QKFxoONQ2dHh6ItM7bzZHOPDQMU83V4r7DbSeYE9NWEjEEEe')`,
-              }}
-            ></div>
           </div>
 
           {/* Form Section */}
@@ -114,10 +133,10 @@ export default function ManualReportScreen() {
               {/* Hazard Pill Selector */}
               <div className="grid grid-cols-2 gap-space-sm">
                 {[
-                  { id: 'pothole', icon: '🕳️', title: 'Pothole', sub: 'Tarmac crater' },
-                  { id: 'waterlogging', icon: '🌊', title: 'Waterlogging', sub: 'Flash puddle / flood' },
-                  { id: 'open_manhole', icon: '⚙️', title: 'Open Manhole', sub: 'Missing drain lid' },
-                  { id: 'speed_breaker', icon: '🚧', title: 'Speed Bump', sub: 'Unmarked hump' },
+                  { id: 'pothole', icon: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Â¢Ã‚Â³ÃƒÂ¯Ã‚Â¸Ã‚Â', title: 'Pothole', sub: 'Tarmac crater' },
+                  { id: 'waterlogging', icon: 'ÃƒÂ°Ã…Â¸Ã…â€™Ã…Â ', title: 'Waterlogging', sub: 'Flash puddle / flood' },
+                  { id: 'open_manhole', icon: 'ÃƒÂ¢Ã…Â¡Ã¢â€žÂ¢ÃƒÂ¯Ã‚Â¸Ã‚Â', title: 'Open Manhole', sub: 'Missing drain lid' },
+                  { id: 'speed_breaker', icon: 'ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â§', title: 'Speed Bump', sub: 'Unmarked hump' },
                 ].map((item) => {
                   const isChecked = hazardType === item.id;
                   return (
@@ -171,7 +190,7 @@ export default function ManualReportScreen() {
                         : 'bg-surface-container text-on-surface border-transparent hover:bg-surface-container-high'
                     }`}
                   >
-                    <span className="text-xl shrink-0">⚠️</span>
+                    <span className="text-xl shrink-0">ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â</span>
                     <div className="min-w-0">
                       <p className="font-label-lg text-label-lg leading-tight font-semibold">
                         Road Cave-in / Other Hazard
@@ -294,6 +313,14 @@ export default function ManualReportScreen() {
                     </span>
                   </div>
                 </label>
+                <button
+                  type="button"
+                  onClick={() => setSeverity('')}
+                  className={`w-full p-3 rounded-xl border text-left font-label-md ${!severity ? 'bg-primary/10 border-primary text-primary' : 'bg-surface-container-low border-transparent text-secondary'}`}
+                >
+                  <span className="material-symbols-outlined align-middle mr-2">auto_awesome</span>
+                  Let AI suggest severity from my description
+                </button>
               </div>
             </div>
 
@@ -327,7 +354,7 @@ export default function ManualReportScreen() {
                 <div className="flex flex-col items-center">
                   <p className="font-label-lg text-label-lg text-primary font-bold">Tap to snap or select photo</p>
                   <p className="font-body-sm text-body-sm text-secondary mt-0.5 max-w-[260px]">
-                    Helps BBMP emergency road crews prioritize hot-mix asphalt dispatch
+                    Photo selection stays in this browser; photo upload is not connected.
                   </p>
                 </div>
 
@@ -335,14 +362,9 @@ export default function ManualReportScreen() {
                 {hasPhoto && (
                   <div className="w-full flex items-center justify-between p-2 rounded-xl bg-surface-container-lowest shadow-sm mt-1 border border-outline-variant/10">
                     <div className="flex items-center gap-space-sm">
-                      <img
-                        className="w-12 h-12 rounded-lg object-cover"
-                        alt="Pothole verification"
-                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuAi_Qqu4uJeeXaqFHBPawoj2kBxiJiP4KiZlBAfnMU-Dy1137WDtiMv_I0aSwXLCY9fJNNmSuwv0i3NF-G23VNXolshyYLYT_20u9CvZAeoyVw77H7jQgWZnGuzOq5pd-6ufVMBRWQfGWJ7tJETvf3Q7o9Vytl_OnsZtVFk9OUlHzrF32FkulHmXlOyn-swjee6Z0bIHxB8y_IZGGXT8k6RCdTQn7rh6pNzkQ6e58MhmOFh_NHlbGvm"
-                      />
                       <div className="text-left">
                         <p className="font-label-md text-label-md text-on-surface font-semibold">{photoFileName}</p>
-                        <p className="font-body-sm text-body-sm text-secondary">Auto-geo stamped • 2.4 MB</p>
+                        <p className="font-body-sm text-body-sm text-secondary">Selected locally; not sent to the server</p>
                       </div>
                     </div>
                     <span className="material-symbols-outlined text-primary text-[20px]">check_circle</span>
@@ -375,33 +397,6 @@ export default function ManualReportScreen() {
               </div>
             </div>
 
-            {/* Civic Broadcast Toggle */}
-            <div className="p-space-md rounded-2xl bg-secondary-container/60 flex items-center justify-between gap-space-sm border border-outline-variant/10">
-              <div className="flex items-start gap-space-sm">
-                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-on-primary shrink-0 mt-0.5">
-                  <span className="material-symbols-outlined text-[18px]">cell_tower</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-label-lg text-label-lg text-on-secondary-fixed font-semibold">
-                    Real-Time SafeRoute Alert
-                  </span>
-                  <span className="font-body-sm text-body-sm text-on-secondary-container">
-                    Instantly warn 418 commuters traveling on 100ft Road
-                  </span>
-                </div>
-              </div>
-
-              <label className="relative inline-flex items-center cursor-pointer shrink-0">
-                <input
-                  checked={realtimeAlert}
-                  onChange={(e) => setRealtimeAlert(e.target.checked)}
-                  className="sr-only peer"
-                  type="checkbox"
-                />
-                <div className="w-11 h-6 bg-outline-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-surface-container-lowest after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-surface-container-lowest after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container"></div>
-              </label>
-            </div>
-
             {/* Submission Action Buttons */}
             <div className="flex flex-col gap-space-sm pt-space-xs">
               <button
@@ -413,7 +408,7 @@ export default function ManualReportScreen() {
                 <span className={`material-symbols-outlined text-[24px] ${isSubmitting ? 'animate-spin' : ''}`}>
                   {isSubmitting ? 'sync' : 'verified'}
                 </span>
-                <span>{isSubmitting ? 'Transmitting to BBMP Dispatch...' : 'Submit Hazard Report'}</span>
+                <span>{isSubmitting ? 'Saving report...' : 'Submit Hazard Report'}</span>
               </button>
 
               <button
@@ -430,10 +425,10 @@ export default function ManualReportScreen() {
           <div className="mt-space-xs flex flex-col items-center gap-space-xs text-center">
             <div className="flex items-center gap-space-xs px-space-md py-1.5 rounded-full bg-surface-container-low text-secondary font-label-sm text-label-sm border border-outline-variant/10">
               <span className="material-symbols-outlined text-[16px] text-surface-tint">security</span>
-              <span>256-bit encrypted • BBMP Civic Portal sync</span>
+              <span>Report stored in SafeRoute</span>
             </div>
             <p className="font-body-sm text-body-sm text-outline max-w-xs">
-              Reports comply with Karnataka Open Data Initiative standards for automated pothole tracking.
+              Photo uploads and municipal dispatch are not configured.
             </p>
           </div>
         </div>

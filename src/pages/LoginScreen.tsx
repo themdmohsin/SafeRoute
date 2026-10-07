@@ -2,14 +2,16 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import Toast from '../components/Toast.tsx';
+import { useAuth } from '../auth/AuthContext';
 
 const LOGO_URL =
   'https://lh3.googleusercontent.com/aida/AEtjO1V3VxtXLXZ-OxUo3gXxROVH0esZPHsa8waby3mZRV_KH4FdKX9FTkgN5s9TeZijNrI0FM7vQpgZzC2P7KXLwFsidJ6HPzM5C6mBZH6W5K-MDnTcH0pDViUCt9nJw9_-3Fh9tcrUJceZ0LvBZ2mTdiPdF87b0vex19uYyMdpCanjjWygeGurlteazL-Xnkt1TDVbtXVTAinw2J7safTglr5Qfj6Bikd2n43Okj2vQuarDiqvKBb-fTL5j3A';
 
 export default function LoginScreen() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('arjun.sharma@example.com');
-  const [password, setPassword] = useState('BengaluruSafe#24');
+  const { login } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -26,7 +28,7 @@ export default function LoginScreen() {
     setIsToastOpen(true);
   };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -37,29 +39,27 @@ export default function LoginScreen() {
       showNotification('Please enter a valid email address', 'error');
       return;
     }
-    if (password.length < 6) {
-      setErrorMessage('Password must be at least 6 characters');
-      showNotification('Password must be at least 6 characters', 'warning');
+    if (password.length < 8) {
+      setErrorMessage('Password must be at least 8 characters');
+      showNotification('Password must be at least 8 characters', 'warning');
       return;
     }
 
     setIsSubmitting(true);
-    showNotification('Authenticating with Bengaluru Smart Mobility...', 'sync');
-
-    setTimeout(() => {
+    try {
+      await login(email, password);
+      navigate('/home', { replace: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to sign in.';
+      setErrorMessage(message);
+      showNotification(message, 'error');
+    } finally {
       setIsSubmitting(false);
-      navigate('/home');
-    }, 900);
+    }
   };
 
   const triggerBiometrics = () => {
-    showNotification('Biometric sensors active. Scanning fingerprint / Face ID...', 'fingerprint');
-    setTimeout(() => {
-      showNotification('Biometric identity confirmed! Welcome Arjun.', 'verified');
-      setTimeout(() => {
-        navigate('/home');
-      }, 700);
-    }, 800);
+    showNotification('Biometric sign-in is not configured. Please use your email and password.', 'info');
   };
 
   return (

@@ -2,6 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import Toast from '../components/Toast.tsx';
+import { apiRequest } from '../lib/api';
+
+interface RideSummaryData {
+  distanceKm: number;
+  durationMinutes: number;
+  hazardsDetectedCount: number;
+  hazardsReportedCount: number;
+  safetyScore: number;
+}
 
 export default function RideSummaryScreen() {
   const navigate = useNavigate();
@@ -12,6 +21,19 @@ export default function RideSummaryScreen() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastIcon, setToastIcon] = useState('check_circle');
   const [isToastOpen, setIsToastOpen] = useState(false);
+  const [ride, setRide] = useState<RideSummaryData | null>(null);
+  const [rideError, setRideError] = useState('');
+
+  useEffect(() => {
+    const rideId = localStorage.getItem('saferoute_summary_ride_id');
+    if (!rideId) {
+      setRideError('No completed ride was selected.');
+      return;
+    }
+    apiRequest<{ ride: RideSummaryData }>(`/rides/${rideId}`)
+      .then(({ ride: completedRide }) => setRide(completedRide))
+      .catch((error) => setRideError(error instanceof Error ? error.message : 'Unable to load ride summary.'));
+  }, []);
 
   const showToast = (msg: string, icon = 'check_circle') => {
     setToastMessage(msg);
@@ -101,7 +123,7 @@ export default function RideSummaryScreen() {
   const handleReplayRoute = () => {
     setIsReplaying(true);
     setReplayProgress(0);
-    showToast('Replaying verified safe corridor telemetry...', 'play_circle');
+    showToast('Showing an illustrative route preview; GPS route recording is not connected.', 'play_circle');
 
     let current = 0;
     const interval = setInterval(() => {
@@ -121,7 +143,7 @@ export default function RideSummaryScreen() {
       navigator
         .share({
           title: 'SafeRoute Commute Summary',
-          text: 'I completed a safe ride across Bengaluru with SafeRoute, avoiding 4 road hazards!',
+          text: `I saved a SafeRoute ride: ${ride?.durationMinutes ?? 0} minutes, ${ride?.hazardsReportedCount ?? 0} reports submitted.`,
           url: window.location.href,
         })
         .catch(() => showToast('Summary link copied to clipboard!', 'content_copy'));
@@ -151,7 +173,7 @@ export default function RideSummaryScreen() {
                 verified
               </span>
               <span className="font-label-sm text-label-sm font-bold uppercase tracking-wider">
-                Ride Completed • Just Now
+                Ride Completed â€¢ Just Now
               </span>
             </div>
 
@@ -168,7 +190,7 @@ export default function RideSummaryScreen() {
               Safe Commute Finished!
             </h2>
             <p className="font-body-md text-secondary max-w-xs mt-1">
-              You avoided 4 dangerous road craters and kept your vehicle safe today.
+              This session was saved to your account. Distance and automatic hazard detection were not recorded.
             </p>
           </div>
 
@@ -181,10 +203,10 @@ export default function RideSummaryScreen() {
                 <span className="material-symbols-outlined text-primary text-[18px]">straighten</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
-                <span className="font-display text-2xl font-bold text-on-surface">14.8</span>
+              <span className="font-display text-2xl font-bold text-on-surface">{ride && ride.distanceKm > 0 ? ride.distanceKm.toFixed(1) : '—'}</span>
                 <span className="font-label-md text-secondary">km</span>
               </div>
-              <span className="font-body-sm text-[11px] text-emerald-700 font-medium mt-1">Saved 4 mins</span>
+              <span className="font-body-sm text-[11px] text-secondary mt-1">GPS distance not recorded</span>
             </div>
 
             {/* Card 2: Duration */}
@@ -194,10 +216,10 @@ export default function RideSummaryScreen() {
                 <span className="material-symbols-outlined text-primary text-[18px]">timer</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
-                <span className="font-display text-2xl font-bold text-on-surface">32</span>
-                <span className="font-label-md text-secondary">min 14s</span>
+                <span className="font-display text-2xl font-bold text-on-surface">{ride?.durationMinutes ?? 'â€”'}</span>
+                <span className="font-label-md text-secondary">minutes</span>
               </div>
-              <span className="font-body-sm text-[11px] text-secondary mt-1">Avg 27.6 km/h</span>
+              <span className="font-body-sm text-[11px] text-secondary mt-1">GPS speed not recorded</span>
             </div>
 
             {/* Card 3: Potholes Avoided */}
@@ -207,7 +229,7 @@ export default function RideSummaryScreen() {
                 <span className="material-symbols-outlined text-on-tertiary-container text-[18px]">security</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
-                <span className="font-display text-2xl font-bold text-on-tertiary-container">4</span>
+                <span className="font-display text-2xl font-bold text-on-tertiary-container">{ride?.hazardsDetectedCount ?? 'â€”'}</span>
                 <span className="font-label-md text-secondary">Craters</span>
               </div>
               <span className="font-body-sm text-[11px] text-emerald-700 font-medium mt-1">0 Impacts detected</span>
@@ -220,12 +242,13 @@ export default function RideSummaryScreen() {
                 <span className="material-symbols-outlined text-primary text-[18px]">military_tech</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
-                <span className="font-display text-2xl font-bold text-primary">+85</span>
-                <span className="font-label-md text-secondary">XP</span>
+                <span className="font-display text-2xl font-bold text-primary">{ride?.hazardsReportedCount ?? 'â€”'}</span>
+                <span className="font-label-md text-secondary">reports</span>
               </div>
-              <span className="font-body-sm text-[11px] text-primary font-medium mt-1">Road Scout Lv. 4</span>
+              <span className="font-body-sm text-[11px] text-primary font-medium mt-1">Submitted during this ride</span>
             </div>
           </div>
+          {rideError && <p className="text-sm text-error" role="alert">{rideError}</p>}
 
           {/* Interactive Route Map Preview with Replay */}
           <div className="bg-surface-container-low rounded-3xl p-4 shadow-sm flex flex-col gap-3 border border-outline-variant/10">
@@ -276,90 +299,17 @@ export default function RideSummaryScreen() {
 
               <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between text-[11px] text-white">
                 <span className="font-semibold bg-black/50 px-2 py-0.5 rounded-md">Start: Koramangala</span>
-                <span className="font-semibold bg-emerald-900/80 px-2 py-0.5 rounded-md">Arrived: Indiranagar</span>
+                <span className="font-semibold bg-emerald-900/80 px-2 py-0.5 rounded-md">Illustrative route only</span>
               </div>
             </div>
           </div>
 
-          {/* Section: Hazards Encountered Breakdown */}
-          <div className="flex flex-col gap-space-sm">
-            <h3 className="font-headline-sm text-headline-sm text-primary font-bold">
-              Hazards Handled on This Trip
-            </h3>
-
-            <div className="flex flex-col gap-2">
-              <div className="p-3 rounded-2xl bg-surface-container-low flex items-center justify-between gap-3 border border-outline-variant/10">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-error-container text-error flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-[20px]">warning</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-label-md font-bold text-on-surface truncate">
-                      100ft Road, Indiranagar
-                    </p>
-                    <p className="font-body-sm text-[12px] text-secondary truncate">
-                      Severe crater (14cm deep) • Bypassed via lane shift
-                    </p>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-label-sm text-xs font-semibold shrink-0">
-                  Safely Avoided
-                </span>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-surface-container-low flex items-center justify-between gap-3 border border-outline-variant/10">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-[20px]">water_damage</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-label-md font-bold text-on-surface truncate">
-                      Domlur Flyover Underpass
-                    </p>
-                    <p className="font-body-sm text-[12px] text-secondary truncate">
-                      Waterlogged puddle • Slowed to 18 km/h
-                    </p>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-label-sm text-xs font-semibold shrink-0">
-                  Caution Passed
-                </span>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-surface-container-low flex items-center justify-between gap-3 border border-outline-variant/10">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-[20px]">report_problem</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-label-md font-bold text-on-surface truncate">
-                      Intermediate Ring Rd
-                    </p>
-                    <p className="font-body-sm text-[12px] text-secondary truncate">
-                      Unmarked speed hump • Audible alert fired
-                    </p>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-label-sm text-xs font-semibold shrink-0">
-                  Alerted
-                </span>
-              </div>
+          <section className="flex flex-col gap-space-sm">
+            <h3 className="font-headline-sm text-headline-sm text-primary font-bold">Ride report summary</h3>
+            <div className="rounded-2xl bg-surface-container-low p-4 text-sm text-secondary">
+              {ride?.hazardsReportedCount ?? 0} hazard reports were submitted during this ride. Automatic hazard detection is not connected.
             </div>
-          </div>
-
-          {/* Civic Community Impact Card */}
-          <div className="rounded-2xl bg-gradient-to-r from-primary to-primary-container text-on-primary p-4 shadow-lg flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-surface-container-lowest/15 flex items-center justify-center text-tertiary-fixed-dim shrink-0">
-              <span className="material-symbols-outlined text-2xl">favorite</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-label-md text-sm font-bold text-on-primary">Civic Impact</p>
-              <p className="font-body-sm text-xs text-on-primary-container leading-tight mt-0.5">
-                Your ride telemetry helped 128 other Bengaluru commuters avoid these road hazards today!
-              </p>
-            </div>
-          </div>
-
+          </section>
           {/* Primary CTA Buttons */}
           <div className="flex flex-col gap-space-sm pt-2">
             <button

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
 import Toast from '../components/Toast.tsx';
+import { apiRequest } from '../lib/api';
 
 export default function StartRideScreen() {
   const navigate = useNavigate();
@@ -25,13 +26,20 @@ export default function StartRideScreen() {
     showToast(`Route updated to ${tag}`);
   };
 
-  const handleBeginRide = () => {
+  const handleBeginRide = async () => {
     setIsStarting(true);
-    showToast(`Locking optimal safe corridor to ${destination}...`);
-    setTimeout(() => {
-      setIsStarting(false);
+    try {
+      const result = await apiRequest<{ id: string; ride: { startTime: string } }>('/rides', { method: 'POST', body: {} });
+      localStorage.setItem('saferoute_active_ride_id', result.id);
+      localStorage.setItem('saferoute_active_ride_start_time', result.ride.startTime);
+      localStorage.setItem('saferoute_active_ride_reports', '0');
+      showToast(`Ride started toward ${destination}.`);
       navigate('/ride/active');
-    }, 800);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not start ride.');
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   return (
@@ -151,8 +159,7 @@ export default function StartRideScreen() {
               {/* High-Accuracy GPS Precision Tag */}
               <div className="self-start flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/85 backdrop-blur-md text-on-primary shadow-sm border border-primary-fixed-dim/20">
                 <span className="w-2 h-2 rounded-full bg-tertiary-fixed-dim animate-pulse"></span>
-                <span className="material-symbols-outlined text-[13px] text-tertiary-fixed-dim">my_location</span>
-                <span className="font-label-sm text-label-sm tracking-wide">100ft Rd, Indiranagar (±2m GPS locked)</span>
+                <span className="material-symbols-outlined text-[13px] text-tertiary-fixed-dim">my_location</span>                <span className="font-label-sm text-label-sm tracking-wide">Illustrative map preview; live GPS unavailable</span>
               </div>
             </div>
 
@@ -162,7 +169,7 @@ export default function StartRideScreen() {
                 aria-label="Recenter map"
                 onClick={() => {
                   setZoomLevel(1);
-                  showToast('Map centered at Indiranagar 100ft Road');
+                  showToast('Map preview centered. Live GPS is not connected.');
                 }}
                 className="w-11 h-11 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md shadow-md flex items-center justify-center text-primary active:scale-95 transition-transform cursor-pointer border border-outline-variant/10"
                 id="recenter-btn"
@@ -173,7 +180,7 @@ export default function StartRideScreen() {
 
               <button
                 aria-label="Toggle map hazard layers"
-                onClick={() => showToast('BBMP Potholes & Live Traffic overlay active')}
+                onClick={() => showToast('Live hazard and traffic map layers are not connected.')}
                 className="w-11 h-11 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md shadow-md flex items-center justify-center text-primary active:scale-95 transition-transform cursor-pointer border border-outline-variant/10"
                 id="layers-btn"
                 type="button"
@@ -302,7 +309,7 @@ export default function StartRideScreen() {
                         </span>
                       </div>
                       <span className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-                        14.8 km • 32 min • 2 minor surface bumps
+                        14.8 km â€¢ 32 min â€¢ 2 minor surface bumps
                       </span>
                     </div>
                   </div>
@@ -334,7 +341,7 @@ export default function StartRideScreen() {
                         </span>
                       </div>
                       <span className="font-body-sm text-body-sm text-error mt-0.5 font-medium">
-                        12.2 km • 28 min • 8 severe craters logged
+                        12.2 km â€¢ 28 min â€¢ 8 severe craters logged
                       </span>
                     </div>
                   </div>

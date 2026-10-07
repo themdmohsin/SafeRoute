@@ -2,16 +2,18 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import Toast from '../components/Toast.tsx';
+import { useAuth } from '../auth/AuthContext';
 
 const LOGO_URL =
   'https://lh3.googleusercontent.com/aida/AEtjO1V3VxtXLXZ-OxUo3gXxROVH0esZPHsa8waby3mZRV_KH4FdKX9FTkgN5s9TeZijNrI0FM7vQpgZzC2P7KXLwFsidJ6HPzM5C6mBZH6W5K-MDnTcH0pDViUCt9nJw9_-3Fh9tcrUJceZ0LvBZ2mTdiPdF87b0vex19uYyMdpCanjjWygeGurlteazL-Xnkt1TDVbtXVTAinw2J7safTglr5Qfj6Bikd2n43Okj2vQuarDiqvKBb-fTL5j3A';
 
 export default function RegisterScreen() {
   const navigate = useNavigate();
-  const [fullName, setFullName] = useState('Ananya Rao');
-  const [email, setEmail] = useState('ananya.rao@example.com');
-  const [password, setPassword] = useState('BengaluruSafe@2025!');
-  const [confirmPassword, setConfirmPassword] = useState('BengaluruSafe@2025!');
+  const { register } = useAuth();
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [telemetryConsent, setTelemetryConsent] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -37,7 +39,7 @@ export default function RegisterScreen() {
 
   const strength = calculateStrength(password);
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
@@ -60,14 +62,16 @@ export default function RegisterScreen() {
     }
 
     setIsSubmitting(true);
-
-    setTimeout(() => {
-      showNotification('Profile registered! Welcome to SafeRoute Bengaluru.');
-      setTimeout(() => {
-        setIsSubmitting(false);
-        navigate('/home');
-      }, 700);
-    }, 1000);
+    try {
+      await register(fullName.trim(), email.trim(), password);
+      navigate('/home', { replace: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to create your account.';
+      setErrorMessage(message);
+      showNotification(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
