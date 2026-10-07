@@ -190,7 +190,7 @@ export default function RideSummaryScreen() {
               Safe Commute Finished!
             </h2>
             <p className="font-body-md text-secondary max-w-xs mt-1">
-              This session was saved to your account. Distance and automatic hazard detection were not recorded.
+              This session was saved to your account with distance measured from the real GPS track.
             </p>
           </div>
 
@@ -206,7 +206,7 @@ export default function RideSummaryScreen() {
               <span className="font-display text-2xl font-bold text-on-surface">{ride && ride.distanceKm > 0 ? ride.distanceKm.toFixed(1) : '—'}</span>
                 <span className="font-label-md text-secondary">km</span>
               </div>
-              <span className="font-body-sm text-[11px] text-secondary mt-1">GPS distance not recorded</span>
+              <span className="font-body-sm text-[11px] text-secondary mt-1">Measured from the recorded GPS track</span>
             </div>
 
             {/* Card 2: Duration */}
@@ -219,7 +219,7 @@ export default function RideSummaryScreen() {
                 <span className="font-display text-2xl font-bold text-on-surface">{ride?.durationMinutes ?? 'â€”'}</span>
                 <span className="font-label-md text-secondary">minutes</span>
               </div>
-              <span className="font-body-sm text-[11px] text-secondary mt-1">GPS speed not recorded</span>
+              <span className="font-body-sm text-[11px] text-secondary mt-1">Duration of the recorded ride</span>
             </div>
 
             {/* Card 3: Potholes Avoided */}

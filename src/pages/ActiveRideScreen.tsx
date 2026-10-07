@@ -1,31 +1,76 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
 import Toast from '../components/Toast.tsx';
-import { apiRequest } from '../lib/api';
+import RideMap from '../map/RideMap.tsx';
+import { useActiveRide } from '../hooks/useActiveRide.ts';
+
+/** Renders any subsystem status as an honest coloured chip. */
+function StatusChip({
+  label,
+  status,
+  detail,
+  action,
+}: {
+  label: string;
+  status: string;
+  detail?: string | null;
+  action?: { text: string; onClick: () => void };
+}) {
+  const tone =
+    status === 'active' || status === 'ready'
+      ? 'bg-tertiary-fixed-dim/20 text-on-tertiary-fixed-variant'
+      : status === 'requesting' || status === 'permission-required' || status === 'syncing'
+        ? 'bg-secondary-container text-on-secondary-container'
+        : status === 'denied' || status === 'error' || status === 'unavailable'
+          ? 'bg-error-container text-on-error-container'
+          : 'bg-surface-container-high text-on-surface-variant';
+  const icon =
+    status === 'active' || status === 'ready'
+      ? 'check_circle'
+      : status === 'requesting' || status === 'permission-required'
+        ? 'pending'
+        : status === 'denied' || status === 'error'
+          ? 'error'
+          : status === 'unavailable'
+            ? 'block'
+            : 'radio_button_unchecked';
+  return (
+    <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 ${tone}`}>
+      <span className="material-symbols-outlined text-[14px]">{icon}</span>
+      <span className="font-label-sm text-[11px] font-bold uppercase tracking-wide">
+        {label}: {status}
+      </span>
+      {detail && <span className="font-label-sm text-[11px] opacity-80 truncate max-w-[130px]">{detail}</span>}
+      {action && (
+        <button
+          type="button"
+          onClick={action.onClick}
+          className="ml-1 rounded-full bg-surface-container-lowest px-2 py-0.5 font-label-sm text-[11px] font-bold text-primary active:scale-95 cursor-pointer"
+        >
+          {action.text}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function gpsDetail(
+  fix: { lat: number; lng: number; accuracyM: number | null } | null,
+  isStale: boolean,
+): string | null {
+  if (!fix) return null;
+  const accuracy = fix.accuracyM !== null ? `±${Math.round(fix.accuracyM)}m` : '±?';
+  return `${fix.lat.toFixed(5)}, ${fix.lng.toFixed(5)} ${accuracy}${isStale ? ' (stale)' : ''}`;
+}
 
 export default function ActiveRideScreen() {
   const navigate = useNavigate();
-
-  const [secondsElapsed, setSecondsElapsed] = useState(0);
-  const [voiceActive, setVoiceActive] = useState(true);
+  const ride = useActiveRide();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-
   const [toastMessage, setToastMessage] = useState('');
-  const [toastSubtitle, setToastSubtitle] = useState('');
-  const [showToast, setShowToast] = useState(false);
-
-  useEffect(() => {
-    const startTime = Date.parse(localStorage.getItem('saferoute_active_ride_start_time') || '');
-    if (!Number.isNaN(startTime)) setSecondsElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
-    const timer = setInterval(() => {
-      if (!Number.isNaN(startTime)) setSecondsElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
+  const [isToastOpen, setIsToastOpen] = useState(false);
 
   const formatTime = (totalSeconds: number) => {
     const mins = Math.floor(totalSeconds / 60);
@@ -33,294 +78,230 @@ export default function ActiveRideScreen() {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const triggerQuickTag = (type: string) => {
-    setToastMessage(`${type} preview is not connected to live location or routing.`);
-    setToastSubtitle('Use the report form to save a hazard with your device location.');
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setIsToastOpen(true);
   };
 
-  const handleConfirmSave = async () => {
-    setIsSaving(true);
-    try {
-      const rideId = localStorage.getItem('saferoute_active_ride_id');
-      if (!rideId) throw new Error('No active ride session was found. Start a new ride first.');
-      await apiRequest(`/rides/${rideId}`, {
-        method: 'PATCH',
-        body: {
-          distanceKm: 0,
-          durationMinutes: Math.round(secondsElapsed / 60),
-          hazardsDetectedCount: 0,
-          hazardsReportedCount: Number(localStorage.getItem('saferoute_active_ride_reports') || 0),
-        },
-      });
-      localStorage.setItem('saferoute_summary_ride_id', rideId);
-      localStorage.removeItem('saferoute_active_ride_id');
-      localStorage.removeItem('saferoute_active_ride_start_time');
-      localStorage.removeItem('saferoute_active_ride_reports');
-      setIsModalOpen(false);
-      navigate('/ride/summary');
-    } catch (error) {
-      setToastMessage(error instanceof Error ? error.message : 'Unable to save this ride.');
-      setToastSubtitle('Check your connection and try again.');
-      setShowToast(true);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  // No active ride session: be honest instead of simulating one.
+  if (!ride.rideId) {
+    return (
+      <div className="bg-primary-container text-surface pt-safe pb-safe antialiased min-h-screen flex flex-col">
+        <AppHeader title="Active Ride" variant="main" />
+        <main className="flex-1 flex flex-col items-center justify-center gap-4 bg-surface max-w-lg w-full mx-auto px-6 text-center">
+          <span className="material-symbols-outlined text-4xl text-secondary">directions_car_off</span>
+          <h2 className="font-headline-sm text-lg font-bold text-on-surface">No active ride</h2>
+          <p className="font-body-sm text-secondary">
+            Start a ride first so SafeRoute can track real GPS, motion and telemetry.
+          </p>
+          <button
+            onClick={() => navigate('/ride/start')}
+            className="h-12 px-6 rounded-xl bg-primary text-on-primary font-label-lg font-bold active:scale-95 cursor-pointer"
+          >
+            Go to Start Ride
+          </button>
+        </main>
+        <BottomNav />
+      </div>
+    );
+  }
+
+  const gps = ride.gps;
+  const motion = ride.motion;
 
   return (
-    <div className="bg-primary-container text-surface pt-safe pb-safe antialiased min-h-screen flex flex-col selection:bg-secondary-container">
-      {/* Header title FIXED to "Active Ride" */}
+    <div className="bg-primary-container text-surface pt-safe pb-safe antialiased min-h-screen flex flex-col">
       <AppHeader title="Active Ride" variant="main" />
 
       <main className="flex-1 flex flex-col relative w-full pt-16 pb-24 bg-surface max-w-lg mx-auto">
         <div className="flex flex-col w-full relative select-none overflow-hidden pb-6">
-          {/* Map Engine Canvas Simulation */}
-          <div className="relative w-full h-[760px] overflow-hidden rounded-3xl bg-primary shadow-2xl">
-            {/* Map Background Image */}
-            <div
-              className="absolute inset-0 bg-cover bg-center scale-105 transition-transform duration-1000"
-              style={{
-                backgroundImage: `url('https://lh3.googleusercontent.com/aida-public/AB6AXuDXgDlUFV5WTGlv91RTRsiJpkSqInVjAsgVzn-PflvT2Cu5NSzmCJUurc_zfSos2YcxVbB36bbx--K050vRePXW1wNFr50XsoPIo1GidYWnjcjhTih0u9pnH2Y-o9loO5-J_k3GJ_YhIjQoqO-XP_NI7SP3aXJ3iKcVSbIkti-94K4LEnkAKzJyEvjzeO7hq30sUDzB6V6CXtk1EJSL08bni0Vx1pqlRCeJG8DHfof_mHd97aS6gybJ')`,
-              }}
-            ></div>
+          <div className="relative w-full h-[640px] overflow-hidden rounded-3xl bg-primary shadow-2xl">
+            {/* Real Mapbox map driven by live GPS */}
+            <RideMap
+              position={ride.mapPosition}
+              track={ride.trackCoordinates}
+              route={ride.route.coordinates}
+              destination={
+                ride.route.status === 'ready' && ride.route.coordinates
+                  ? {
+                      lat: ride.route.coordinates[ride.route.coordinates.length - 1][1],
+                      lng: ride.route.coordinates[ride.route.coordinates.length - 1][0],
+                      label: ride.route.label ?? ride.destinationQuery ?? '',
+                    }
+                  : null
+              }
+              follow={ride.follow}
+            />
 
-            {/* Map Glow Gradient Overlays */}
-            <div className="absolute inset-0 bg-gradient-to-b from-primary/80 via-transparent to-primary/90 pointer-events-none"></div>
-
-            {/* SVG Navigation Path & Dynamic Guidance */}
-            <svg
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              fill="none"
-              viewBox="0 0 400 760"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <defs>
-                <filter height="140%" id="glow" width="140%" x="-20%" y="-20%">
-                  <feGaussianBlur result="blur" stdDeviation="6"></feGaussianBlur>
-                  <feMerge>
-                    <feMergeNode in="blur"></feMergeNode>
-                    <feMergeNode in="SourceGraphic"></feMergeNode>
-                  </feMerge>
-                </filter>
-                <linearGradient id="routeGradient" x1="0" x2="0" y1="1" y2="0">
-                  <stop offset="0%" stopColor="#dd9202"></stop>
-                  <stop offset="50%" stopColor="#ffb955"></stop>
-                  <stop offset="100%" stopColor="#d8e2ff"></stop>
-                </linearGradient>
-              </defs>
-
-              {/* Outer Pulse Path */}
-              <path
-                d="M 200 660 L 205 530 L 235 410 L 220 310 L 150 250 L 140 180"
-                stroke="#dd9202"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeOpacity="0.35"
-                strokeWidth="12"
-              ></path>
-
-              {/* Core Active Glowing Polyline */}
-              <path
-                d="M 200 660 L 205 530 L 235 410 L 220 310 L 150 250 L 140 180"
-                filter="url(#glow)"
-                stroke="url(#routeGradient)"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="6"
-              ></path>
-
-              {/* Animated Direction Dashes */}
-              <path
-                d="M 200 660 L 205 530 L 235 410 L 220 310 L 150 250 L 140 180"
-                opacity="0.85"
-                stroke="#ffffff"
-                strokeDasharray="8 16"
-                strokeLinecap="round"
-                strokeWidth="3"
-              >
-                <animate attributeName="stroke-dashoffset" dur="1.8s" repeatCount="indefinite" values="48;0"></animate>
-              </path>
-
-              {/* Radar Pulse Waves from Vehicle */}
-              <circle cx="205" cy="530" fill="#8ba2d5" fillOpacity="0.18" r="32">
-                <animate attributeName="r" dur="2s" repeatCount="indefinite" values="16;44"></animate>
-                <animate attributeName="opacity" dur="2s" repeatCount="indefinite" values="0.7;0"></animate>
-              </circle>
-            </svg>
-
-            <div className="absolute top-20 left-3 right-3 z-30 rounded-xl bg-black/70 px-3 py-2 text-center text-xs font-semibold text-white">
-              Illustrative map preview; live GPS, speed, and routing are not connected.
-            </div>
-            {/* Illustrative vehicle marker */}
-            <div className="absolute left-[183px] top-[508px] flex items-center justify-center pointer-events-none z-20">
-              <div className="relative flex items-center justify-center w-11 h-11 bg-primary-container rounded-full shadow-xl ring-4 ring-primary-fixed-dim/40">
-                <span
-                  className="material-symbols-outlined text-primary-fixed text-2xl transform rotate-[-8deg]"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  navigation
-                </span>
-                <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-surface-container-lowest rounded-full flex items-center justify-center shadow">
-                  <div className="w-2 h-2 rounded-full bg-on-tertiary-container animate-ping"></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Pin 1: Pothole */}
-            <div className="absolute left-[138px] top-[390px] z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/95 backdrop-blur-md shadow-lg transform -translate-x-1/2 -translate-y-1/2 border border-outline-variant/20">
-              <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
-              <span className="font-label-sm text-error font-bold flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  warning
-                </span>
-                Pothole 180m
-              </span>
-            </div>
-
-            {/* Pin 2: Waterlogging */}
-            <div className="absolute left-[285px] top-[290px] z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/95 backdrop-blur-md shadow-lg transform -translate-x-1/2 -translate-y-1/2 border border-outline-variant/20">
-              <span className="w-2 h-2 rounded-full bg-surface-tint"></span>
-              <span className="font-label-sm text-primary-container font-bold flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  water_damage
-                </span>
-                Waterlogging 400m
-              </span>
-            </div>
-
-            {/* Pin 3: Unmarked Bump */}
-            <div className="absolute left-[92px] top-[232px] z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/95 backdrop-blur-md shadow-lg transform -translate-x-1/2 -translate-y-1/2 border border-outline-variant/20">
-              <span className="w-2 h-2 rounded-full bg-tertiary-fixed-dim"></span>
-              <span className="font-label-sm text-on-tertiary-fixed-variant font-bold flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  traffic
-                </span>
-                Unmarked Bump
-              </span>
-            </div>
-
-            {/* Map Orientation Toggles */}
-            <div className="absolute right-4 top-56 z-20 flex flex-col gap-2.5">
-              <button
-                aria-label="Recenter Map"
-                onClick={() => triggerQuickTag('Vehicle centered on Koramangala corridor')}
-                className="w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-xl">my_location</span>
-              </button>
-              <button
-                aria-label="Layers"
-                onClick={() => triggerQuickTag('Hazard Heatmap Overlay')}
-                className="w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-xl">layers</span>
-              </button>
-              <button
-                aria-label="Sound Toggle"
-                onClick={() => setVoiceActive(!voiceActive)}
-                className="w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-xl">
-                  {voiceActive ? 'volume_up' : 'volume_off'}
-                </span>
-              </button>
-            </div>
-
-            {/* TOP HUD OVERLAY: Turn Cue & Live Metrics Card */}
+            {/* TOP HUD: live route guidance (real route, no fake turns) */}
             <div className="absolute top-3 inset-x-3 z-30 flex flex-col gap-2.5">
-              {/* Turn Navigation Cue HUD */}
               <div className="w-full bg-primary/95 backdrop-blur-xl text-on-primary rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5 border border-outline-variant/15">
                 <div className="w-12 h-12 rounded-xl bg-primary-fixed text-on-primary-fixed flex items-center justify-center flex-shrink-0 shadow-inner">
-                  <span className="material-symbols-outlined text-3xl font-bold">turn_right</span>
+                  <span className="material-symbols-outlined text-3xl font-bold">
+                    {ride.route.status === 'ready' ? 'route' : ride.route.status === 'error' ? 'alt_route' : 'near_me'}
+                  </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline justify-between gap-1">
-                    <span className="font-display text-headline-md tracking-tight font-extrabold text-on-primary truncate">
-                      In 350m
-                    </span>
-                    <span className="font-label-md text-tertiary-fixed font-bold bg-tertiary-container px-2 py-0.5 rounded-md flex-shrink-0">
-                      CRATER WARNING
-                    </span>
-                  </div>
-                  <p className="font-body-md text-primary-fixed text-xs sm:text-sm font-medium line-clamp-1">
-                    Caution severe crater near Sony World Signal
-                  </p>
+                  {ride.route.status === 'ready' ? (
+                    <>
+                      <div className="flex items-baseline justify-between gap-1">
+                        <span className="font-display text-headline-md tracking-tight font-extrabold text-on-primary truncate">
+                          {ride.route.distanceKm?.toFixed(1)} km
+                        </span>
+                        <span className="font-label-md text-tertiary-fixed font-bold bg-tertiary-container px-2 py-0.5 rounded-md flex-shrink-0">
+                          {ride.route.durationMin} min
+                        </span>
+                      </div>
+                      <p className="font-body-md text-primary-fixed text-xs sm:text-sm font-medium line-clamp-1">
+                        Via Mapbox driving → {ride.route.label ?? ride.destinationQuery}
+                      </p>
+                    </>
+                  ) : ride.route.status === 'resolving' ? (
+                    <>
+                      <span className="font-display text-headline-md font-extrabold text-on-primary">Calculating route…</span>
+                      <p className="font-body-md text-primary-fixed text-xs sm:text-sm font-medium line-clamp-1">
+                        Destination: {ride.destinationQuery ?? 'not set'}
+                      </p>
+                    </>
+                  ) : ride.route.status === 'error' ? (
+                    <>
+                      <span className="font-display text-headline-md font-extrabold text-on-primary">Routing unavailable</span>
+                      <p className="font-body-md text-primary-fixed text-xs sm:text-sm font-medium line-clamp-2">
+                        {ride.route.errorMessage}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-display text-headline-md font-extrabold text-on-primary">
+                        {ride.destinationQuery ? 'Waiting for GPS…' : 'No destination set'}
+                      </span>
+                      <p className="font-body-md text-primary-fixed text-xs sm:text-sm font-medium line-clamp-1">
+                        {ride.destinationQuery
+                          ? 'The route is calculated from your real position.'
+                          : 'Start a ride from the Start Ride screen to navigate.'}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Live Telemetry Glass Matrix */}
+              {/* Live Telemetry Matrix — all values real */}
               <div className="w-full bg-surface-container-lowest/90 backdrop-blur-xl rounded-2xl p-3 shadow-lg flex items-center justify-between border border-outline-variant/15">
-                {/* Metric 1: Distance */}
                 <div className="flex flex-col items-center flex-1 px-1">
                   <span className="font-label-sm text-secondary uppercase font-semibold">Distance</span>
                   <div className="flex items-baseline gap-0.5 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-on-surface">—</span>
-                    <span className="font-label-sm text-secondary font-semibold">GPS off</span>
+                    <span className="font-display text-headline-sm font-extrabold text-on-surface">
+                      {ride.distanceKm > 0 || gps.status === 'active' ? ride.distanceKm.toFixed(2) : '—'}
+                    </span>
+                    <span className="font-label-sm text-secondary font-semibold">km</span>
                   </div>
+                  <span className="font-label-sm text-[10px] text-secondary">
+                    {gps.acceptedFixCount > 0 ? `${gps.acceptedFixCount} fixes` : 'no GPS track'}
+                  </span>
                 </div>
                 <div className="w-px h-7 bg-outline-variant/50"></div>
 
-                {/* Metric 2: Elapsed Time */}
                 <div className="flex flex-col items-center flex-1 px-1">
                   <span className="font-label-sm text-secondary uppercase font-semibold">Time</span>
                   <div className="flex items-baseline gap-0.5 mt-0.5">
                     <span className="font-display text-headline-sm font-extrabold text-on-surface">
-                      {formatTime(secondsElapsed)}
+                      {formatTime(ride.elapsedSeconds)}
                     </span>
                   </div>
+                  <span className="font-label-sm text-[10px] text-secondary">elapsed</span>
                 </div>
                 <div className="w-px h-7 bg-outline-variant/50"></div>
 
-                {/* Metric 3: Hazards detected */}
                 <div className="flex flex-col items-center flex-1 px-1">
                   <span className="font-label-sm text-secondary uppercase font-semibold flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-error animate-ping"></span>
-                    Hazards
+                    Reports
                   </span>
                   <div className="flex items-baseline gap-1 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-error">0</span>
-                    <span className="font-label-sm text-error font-semibold">Auto detect off</span>
+                    <span className="font-display text-headline-sm font-extrabold text-error">
+                      {Number(localStorage.getItem('saferoute_active_ride_reports') || 0)}
+                    </span>
                   </div>
+                  <span className="font-label-sm text-[10px] text-secondary">this ride</span>
                 </div>
                 <div className="w-px h-7 bg-outline-variant/50"></div>
 
-                {/* Metric 4: Speed */}
                 <div className="flex flex-col items-center flex-1 px-1">
                   <span className="font-label-sm text-secondary uppercase font-semibold">Speed</span>
                   <div className="flex items-baseline gap-0.5 mt-0.5">
                     <span className="font-display text-headline-sm font-extrabold text-primary-container">
-                      —
+                      {ride.speedKmh !== null ? ride.speedKmh.toFixed(0) : '—'}
                     </span>
-                    <span className="font-label-sm text-secondary font-semibold">GPS off</span>
+                    <span className="font-label-sm text-secondary font-semibold">km/h</span>
                   </div>
+                  <span className="font-label-sm text-[10px] text-secondary">
+                    {ride.speedKmh !== null ? 'from GPS' : 'not reported'}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Speed Limit Pill Overlay on Map */}
-            <div className="absolute left-4 bottom-28 z-20 flex items-center gap-2">
-              <div className="w-11 h-11 rounded-full bg-surface-container-lowest text-error flex flex-col items-center justify-center shadow-lg ring-2 ring-error">
-                <span className="font-label-sm text-[8px] leading-none font-bold uppercase text-secondary">Limit</span>
-                <span className="font-display text-label-lg font-black text-on-surface leading-tight">50</span>
-              </div>
-              <div className="px-3 py-1.5 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md shadow-md border border-outline-variant/10">
-                <p className="font-label-sm text-secondary">Current Road</p>
-                <p className="font-headline-sm text-xs font-bold text-on-surface">Koramangala 80ft Rd</p>
-              </div>
+            {/* Sensor status strip: honest states for GPS, motion, wake lock, telemetry */}
+            <div className="absolute left-3 right-3 bottom-24 z-20 flex flex-col items-start gap-1.5">
+              <StatusChip
+                label="GPS"
+                status={gps.isStale && gps.status === 'active' ? 'stale' : gps.status}
+                detail={gpsDetail(gps.fix, gps.isStale)}
+              />
+              <StatusChip
+                label="Motion"
+                status={motion.status}
+                detail={motion.status === 'active' ? `${motion.sampleCount} samples` : motion.lastError}
+                action={
+                  motion.status === 'permission-required'
+                    ? { text: 'Enable', onClick: () => void ride.requestMotionAccess() }
+                    : undefined
+                }
+              />
+              <StatusChip label="Wake lock" status={ride.wakeLock.status} detail={ride.wakeLock.lastError} />
+              <StatusChip
+                label="Telemetry"
+                status={ride.telemetry.status}
+                detail={
+                  ride.telemetry.status === 'error' && ride.telemetry.lastError
+                    ? `${ride.telemetry.pendingCount} queued · ${ride.telemetry.lastError}`
+                    : `${ride.telemetry.uploadedCount} uploaded${ride.telemetry.pendingCount > 0 ? ` · ${ride.telemetry.pendingCount} queued` : ''}`
+                }
+              />
             </div>
 
-            {/* FLOATING ACTION BUTTON: Quick 1-Tap Hazard Report -> /report */}
-            <div className="absolute right-4 bottom-24 z-30">
+            {/* Map controls */}
+            <div className="absolute right-3 bottom-52 z-20 flex flex-col gap-2.5">
+              <button
+                aria-label="Recenter map on my location"
+                onClick={ride.recenter}
+                className={`w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer ${
+                  ride.follow ? 'ring-2 ring-primary/40' : ''
+                }`}
+              >
+                <span className="material-symbols-outlined text-xl">my_location</span>
+              </button>
+              <button
+                aria-label="Recalculate route"
+                onClick={() => {
+                  ride.reroute();
+                  showToast('Recalculating the route from your current position.');
+                }}
+                className="w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-xl">alt_route</span>
+              </button>
+            </div>
+
+            {/* FLOATING ACTION BUTTON: quick hazard report */}
+            <div className="absolute right-4 bottom-44 z-30">
               <button
                 id="floating-report-btn"
                 aria-label="Instant Hazard Report"
                 onClick={() => navigate('/report')}
-                className="group relative flex items-center justify-center w-16 h-16 rounded-full bg-on-tertiary-container text-on-primary shadow-2xl active:scale-90 transition-all duration-200 focus:outline-none cursor-pointer"
+                className="group relative flex items-center justify-center w-14 h-14 rounded-full bg-on-tertiary-container text-on-primary shadow-2xl active:scale-90 transition-all duration-200 cursor-pointer"
               >
                 <span className="absolute -inset-2 rounded-full bg-on-tertiary-container/30 animate-ping pointer-events-none"></span>
-                <span className="absolute -inset-1 rounded-full bg-tertiary-fixed-dim/40 blur-sm pointer-events-none"></span>
                 <div className="relative flex flex-col items-center justify-center">
                   <span
                     className="material-symbols-outlined text-2xl font-bold text-surface-container-lowest"
@@ -335,105 +316,44 @@ export default function ActiveRideScreen() {
               </button>
             </div>
 
-            {/* BOTTOM CONTROL SHEET HUD */}
+            {/* BOTTOM CONTROL SHEET */}
             <div className="absolute inset-x-0 bottom-0 z-30 p-3 pt-2 bg-gradient-to-t from-primary via-primary/95 to-transparent">
               <div className="bg-surface-container-lowest/95 backdrop-blur-xl rounded-2xl p-3 shadow-2xl flex flex-col gap-2.5 border border-outline-variant/10">
-                {/* Live Hazard Quick-Tagger Tray */}
                 <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
-                  <button
-                    onClick={() => triggerQuickTag('Pothole')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-tertiary-fixed-dim"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
+                  {['Pothole', 'Waterlog', 'Road Work', 'Unmarked Bump'].map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => showToast(`${tag} reports use the full form for accurate location data.`)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
                     >
-                      circle
-                    </span>
-                    Pothole
-                  </button>
-                  <button
-                    onClick={() => triggerQuickTag('Waterlog')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-surface-tint"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      water
-                    </span>
-                    Waterlog
-                  </button>
-                  <button
-                    onClick={() => triggerQuickTag('Road Work')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-error"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      construction
-                    </span>
-                    Road Work
-                  </button>
-                  <button
-                    onClick={() => triggerQuickTag('Unmarked Bump')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-secondary"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      speed
-                    </span>
-                    Unmarked Bump
-                  </button>
+                      <span className="material-symbols-outlined text-sm text-primary">report</span>
+                      {tag}
+                    </button>
+                  ))}
                 </div>
 
-                {/* Primary Action Tier: Guidance Status & End Ride Button */}
                 <div className="flex items-center gap-2.5 pt-1">
-                  {/* Voice Navigation Status Pill */}
-                  <button
-                    aria-label="Toggle Navigation Audio"
-                    onClick={() => setVoiceActive(!voiceActive)}
-                    className={`h-12 px-3.5 rounded-xl bg-surface-container text-on-surface flex items-center justify-center gap-2 hover:bg-surface-variant active:scale-95 transition-transform flex-shrink-0 cursor-pointer ${
-                      !voiceActive ? 'opacity-50' : ''
-                    }`}
-                    id="voice-toggle-btn"
-                  >
-                    <span className="material-symbols-outlined text-primary-container text-xl" id="voice-icon">
-                      {voiceActive ? 'record_voice_over' : 'voice_over_off'}
-                    </span>
-                    <span className="font-label-sm text-xs font-bold text-primary-container hidden sm:inline">
-                      {voiceActive ? 'Voice On' : 'Voice Off'}
-                    </span>
-                  </button>
-
-                  {/* Reroute Button */}
-                  <button
-                    aria-label="Alternative Safer Route"
-                    onClick={() => triggerQuickTag('Rerouting via Inner Ring Road')}
-                    className="h-12 w-12 rounded-xl bg-secondary-container text-on-secondary-container flex items-center justify-center hover:opacity-90 active:scale-95 transition-transform flex-shrink-0 cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-xl">alt_route</span>
-                  </button>
-
-                  {/* Urgent Primary End Ride Button */}
                   <button
                     id="end-ride-trigger"
                     onClick={() => setIsModalOpen(true)}
-                    className="flex-1 h-12 px-4 rounded-xl bg-error text-on-error flex items-center justify-center gap-2 font-label-lg font-bold shadow-md hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer"
+                    disabled={ride.isEnding}
+                    className="flex-1 h-12 px-4 rounded-xl bg-error text-on-error flex items-center justify-center gap-2 font-label-lg font-bold shadow-md hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-80"
                   >
                     <span className="material-symbols-outlined text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>
                       stop_circle
                     </span>
-                    <span className="tracking-wide">End & Save Ride</span>
+                    <span className="tracking-wide">{ride.isEnding ? 'Finishing…' : 'End & Save Ride'}</span>
                   </button>
                 </div>
+                {ride.endError && (
+                  <p className="font-body-sm text-xs text-error" role="alert">
+                    {ride.endError}
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Confirm End Ride Modal Sheet */}
+            {/* Confirm End Ride Modal */}
             {isModalOpen && (
               <div
                 id="end-confirm-modal"
@@ -446,7 +366,14 @@ export default function ActiveRideScreen() {
                     </div>
                     <div>
                       <h3 className="font-headline-sm font-bold text-on-surface">Finish Ride & Save Stats?</h3>
-                      <p className="font-body-sm text-secondary">Distance and automatic hazard detection are not available without device tracking.</p>
+                      <p className="font-body-sm text-secondary">
+                        {ride.distanceKm.toFixed(2)} km tracked over {formatTime(ride.elapsedSeconds)} from your real
+                        GPS track
+                        {ride.telemetry.pendingCount > 0
+                          ? `, ${ride.telemetry.pendingCount} telemetry windows still uploading`
+                          : ''}
+                        .
+                      </p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2.5">
@@ -459,30 +386,17 @@ export default function ActiveRideScreen() {
                     </button>
                     <button
                       id="confirm-save-btn"
-                      onClick={handleConfirmSave}
-                      disabled={isSaving}
+                      onClick={() => {
+                        setIsModalOpen(false);
+                        void ride.endRide();
+                      }}
+                      disabled={ride.isEnding}
                       className="h-12 rounded-xl bg-error text-on-error font-label-lg font-bold shadow-md active:scale-95 transition-transform cursor-pointer flex items-center justify-center gap-1 disabled:opacity-80"
                     >
-                      {isSaving && <span className="material-symbols-outlined animate-spin text-[18px]">sync</span>}
-                      <span>{isSaving ? 'Saving...' : 'Yes, Save & Exit'}</span>
+                      {ride.isEnding && <span className="material-symbols-outlined animate-spin text-[18px]">sync</span>}
+                      <span>{ride.isEnding ? 'Saving...' : 'Yes, Save & Exit'}</span>
                     </button>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Quick Report Notification Toast */}
-            {showToast && (
-              <div
-                id="report-toast"
-                className="absolute top-28 inset-x-6 z-40 bg-on-secondary-fixed text-surface-bright rounded-2xl p-3 shadow-2xl flex items-center gap-3 transition-all duration-300 border border-outline-variant/20 animate-in fade-in slide-in-from-top-2"
-              >
-                <div className="w-8 h-8 rounded-full bg-on-tertiary-container flex items-center justify-center text-on-primary shrink-0">
-                  <span className="material-symbols-outlined text-base">check</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-label-md text-xs font-bold text-surface-container-lowest">{toastMessage}</p>
-                  <p className="font-body-sm text-[11px] text-surface-variant">{toastSubtitle}</p>
                 </div>
               </div>
             )}
@@ -491,6 +405,7 @@ export default function ActiveRideScreen() {
       </main>
 
       <BottomNav />
+      <Toast message={toastMessage} isOpen={isToastOpen} onClose={() => setIsToastOpen(false)} />
     </div>
   );
 }

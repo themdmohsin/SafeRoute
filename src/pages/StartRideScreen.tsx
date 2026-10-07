@@ -33,6 +33,9 @@ export default function StartRideScreen() {
       localStorage.setItem('saferoute_active_ride_id', result.id);
       localStorage.setItem('saferoute_active_ride_start_time', result.ride.startTime);
       localStorage.setItem('saferoute_active_ride_reports', '0');
+      // The destination is resolved by the active ride screen via Mapbox
+      // geocoding; it must never be a hardcoded route.
+      localStorage.setItem('saferoute_active_ride_destination', destination.trim());
       showToast(`Ride started toward ${destination}.`);
       navigate('/ride/active');
     } catch (error) {
