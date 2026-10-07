@@ -1,8 +1,14 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { FEATURE_NAMES, LABEL_CLASSES, buildFeatureVector } from '../ml/featureVector.js';
 import { getHazardThreshold, inferWindow, shouldDebounceMlDetection } from '../services/mlHazardService.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const fixtureModelPath = path.join(__dirname, 'fixtures', 'demoModelFixture.json');
 
 const validWindow = {
   schemaVersion: 1,
@@ -95,20 +101,20 @@ test('missing GPS values are handled without fabricated zero values', () => {
 });
 
 test('model loads successfully and returns a valid label and confidence', async () => {
-  const result = await inferWindow(validWindow);
+  const result = await inferWindow(validWindow, { modelPath: fixtureModelPath });
   assert.ok(LABEL_CLASSES.includes(result.label));
   assert.ok(result.confidence >= 0 && result.confidence <= 1);
 });
 
 test('low confidence and normal predictions are not treated as hazards', async () => {
-  const result = await inferWindow(normalWindow);
+  const result = await inferWindow(normalWindow, { modelPath: fixtureModelPath });
   assert.equal(result.label, 'normal');
   assert.ok(result.confidence >= 0 && result.confidence <= 1);
   assert.ok(getHazardThreshold() > 0.5);
 });
 
 test('pothole-like windows produce a hazard-class prediction', async () => {
-  const result = await inferWindow(potholeWindow);
+  const result = await inferWindow(potholeWindow, { modelPath: fixtureModelPath });
   assert.ok(['pothole', 'speed_breaker'].includes(result.label));
   assert.ok(result.confidence >= 0 && result.confidence <= 1);
 });

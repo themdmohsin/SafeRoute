@@ -1,22 +1,18 @@
 # ML hazard detection pipeline
 
-## Problem statement
+## Implemented
 
-SafeRoute uses a simple 2-second sensor window with aggregated accelerometer, gravity, gyroscope, and GPS features. The ML layer classifies each window into one of the three supported labels: `normal`, `speed_breaker`, and `pothole`.
+This branch implements the SafeRoute ML boundary around the existing telemetry window contract rather than reinventing the sensor pipeline.
 
-## Supported classes
+### Supported classes
 
 - `normal`
 - `speed_breaker`
 - `pothole`
 
-This project intentionally does not attempt to detect `broken_patch`, `crack`, or `rough_road`, because the project aims for a credible college-level baseline rather than a large production detector.
+This project does not include the extra classes from the broader road-surface taxonomies, because the project requirement explicitly limits the target classes to the three above.
 
-## Dataset
-
-The repository does not contain a validated field-collection dataset, so the saved model is trained on a small synthetic demo dataset for smoke testing and API verification. The synthetic rows are clearly labelled as demo-only and are not representative of live road conditions.
-
-## Feature vector
+### Canonical feature extractor
 
 The exact feature ordering is fixed in [server/ml/featureVector.js](../server/ml/featureVector.js):
 
@@ -31,42 +27,121 @@ The exact feature ordering is fixed in [server/ml/featureVector.js](../server/ml
 - `gyro_maxMagnitudeDegPerS`
 - `gps_speedMps`
 
-Missing numeric values are preserved as `NaN` during feature extraction and then imputed using the model's training medians at inference time. This avoids inserting fake zeros, while still keeping the model input valid.
+Missing numeric values are preserved as `NaN` during extraction and imputed only when the downstream model requires it. The code does not fabricate zero values for unavailable sensors.
 
-## Model
+### Inference flow
 
-The implementation uses a Random Forest classifier from `ml-random-forest` with a small synthetic dataset. The trained artifact is stored in [server/ml/modelArtifact.json](../server/ml/modelArtifact.json).
-
-## Inference flow
-
-`telemetry window -> feature extraction -> imputation -> Random Forest -> label/confidence`
+`telemetry window -> canonical feature extraction -> model -> label/confidence`
 
 The backend exposes:
 
-- `POST /api/ml/infer`: returns `{ label, confidence }`
-- `POST /api/ml/hazard`: decides whether a hazard should be created based on confidence threshold and duplicate suppression
+- `POST /api/ml/infer`
+- `POST /api/ml/hazard`
 
-## Confidence threshold
+The confidence gate is configurable using `ML_HAZARD_CONFIDENCE_THRESHOLD` and defaults to `0.72`.
 
-The default confidence floor is `0.72` and is configurable via `ML_HAZARD_CONFIDENCE_THRESHOLD`.
+### Debounce logic
 
-## Debounce logic
+A hazard is only created when:
 
-A hazard is only created when the predicted label is not `normal`, the confidence exceeds the configured threshold, and there is no recent nearby hazard with the same `mlLabel` within 50 meters and 30 minutes.
+- the model predicts a non-normal label
+- confidence is at or above the configured threshold
+- there is no recent nearby ML hazard with the same `mlLabel` within roughly 50 m and 30 minutes
 
-## Limitations
+This avoids duplicate hazards from repeated windows from the same road defect.
 
-- no large-scale real-world validation yet
-- small synthetic demo dataset only
-- sensor aggregation is limited to 2-second windows
-- different mounts, phones, road surfaces, and speed profiles can change signal quality
-- model should be retrained with real labelled windows before claiming production reliability
+## Real dataset research and access audit
 
-## Training and validation workflow
+The following public smartphone/IMU road-event datasets were reviewed before changing the training path. The main conclusion is that no single legitimate dataset was directly downloadable in this environment without unclear or restricted access, so the final training step remains blocked until a public dataset is actually obtained.
 
-1. collect labelled 2-second telemetry windows
-2. convert them into the fixed feature vector
-3. split by ride/session to avoid leakage
-4. train and evaluate a Random Forest model
-5. save the artifact and feature metadata
-6. use the configured confidence threshold for hazard creation
+| Dataset | Source / reference | Sensors | Sampling rate | Phone / mount | Labels | License / access | Downloadable here? | Pothole | Speed breaker | Normal | GPS / speed |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Khandakar smartphone pothole dataset | Khandakar et al. smartphone pothole detection papers; title patterns include road pothole detection from smartphone sensor data and automated machine learning pothole detection using smartphone sensor data | Smartphone accelerometer / gyroscope; often IMU + optional GPS | Usually 20-50 Hz or similar phone sampling in the paper methods | Smartphone mounted in vehicle; exact mount varies by study | Pothole / normal (and often rough-road variants depending on the study) | Usually paper-based publication; no standard public dataset license was confirmed in the available metadata | Not confirmed as a directly downloadable public dataset in this environment | Yes | Not usually | Yes | Sometimes GPS/speed metadata present, but not guaranteed |
+| RoadSense / RSC smartphone road-surface condition work | RoadSense: smartphone application to estimate road conditions using accelerometer and gyroscope; Road Surface Condition / roughness papers | Accelerometer + gyroscope | Paper-specific; often tens of Hz from phone sensors | Consumer smartphone mounted in vehicle | Rough / smooth / varied road condition labels; not always pothole-specific | Academic paper only; dataset access not clearly published as a reusable public archive | Not confirmed as directly downloadable public data in this environment | Sometimes indirectly, but not as a clean pothole class | Not reliably | Yes | Often limited or context-dependent |
+| Kaggle road-surface / pothole sensor datasets | Kaggle search results for "pothole sensor data", "speed breaker accelerometer", "road surface condition accelerometer" | Accelerometer / gyroscope / sometimes GPS | Varies by dataset | Varies by dataset | Pothole / normal / speed breaker / road quality | Kaggle terms + dataset-specific licensing; often requires login and agreement | Not available here because Kaggle access/login was not established | Often yes | Often yes | Often yes | Dataset-dependent |
+| PVS / traffic-driving-style-road-surface-condition dataset | Kaggle result for road surface condition and passive vehicular sensors | Passive vehicular sensors, accelerometer, likely smartphone/vehicle telemetry | Varies | Vehicle-embedded or phone-based setups | Road surface condition / traffic / driving style categories | Kaggle or dataset-specific terms apply; not confirmed as open/reusable without login | Not available here because Kaggle access/login was not established | Depends on labels | Depends on labels | Yes | Sometimes present |
+
+### Access conclusions
+
+- The Khandakar and RoadSense/RSC papers are legitimate academic references and are relevant to the problem, but the dataset files themselves were not accessed in a way that would allow a reproducible training run in this environment.
+- The Kaggle datasets are the closest practical public candidates, but they are not directly downloadable without a Kaggle account and acceptance of dataset terms.
+- Because no real dataset was obtained here, the final model training remains blocked and no real evaluation metrics are available.
+
+## Dataset conversion pipeline
+
+The project includes a real-data conversion interface, but it is intentionally blocked until a real labelled dataset is supplied.
+
+The conversion flow is:
+
+```
+raw public sensor dataset
+  -> dataset-specific parser
+  -> SafeRoute-style 2-second window synthesis
+  -> canonical SafeRoute feature extraction
+  -> label mapping to normal / speed_breaker / pothole
+  -> grouped train/validation/test split by ride/session
+  -> Random Forest training/evaluation
+```
+
+This is implemented in [server/ml/trainModel.js](../server/ml/trainModel.js) and relies on the canonical feature extractor in [server/ml/featureVector.js](../server/ml/featureVector.js).
+
+## Label mapping policy
+
+The SafeRoute target labels are:
+
+- `normal`
+- `speed_breaker`
+- `pothole`
+
+Only source labels that map cleanly to those semantics are accepted. For example:
+
+- `speed bump`, `speed breaker`, `hump` -> `speed_breaker`
+- `pothole`, `road_hole` -> `pothole`
+- `smooth`, `asphalt`, `good_road` -> `normal`
+
+Classes that cannot be mapped with confidence are intentionally excluded rather than forced into the wrong class.
+
+## Current status: training blocked
+
+The project does not currently have a legitimate, downloaded, reusable labelled dataset for final training. To avoid fake results, the production artifact at [server/ml/modelArtifact.json](../server/ml/modelArtifact.json) is intentionally left in a `training-blocked` state instead of pretending a synthetic smoke-test model is real.
+
+The synthetic unit-test model is kept only under the test-fixture path and is explicitly not used as the final model for training or evaluation.
+
+## Model and evaluation status
+
+### Actual model
+
+- algorithm: Random Forest (implementation ready)
+- feature count: 27
+- classes: `normal`, `speed_breaker`, `pothole`
+- artifact: [server/ml/modelArtifact.json](../server/ml/modelArtifact.json)
+- model version: blocked; real training not performed
+
+### Actual evaluation metrics
+
+None are reported because no real labelled dataset has been obtained. This is intentional and required to avoid fabricated results.
+
+## Not yet validated
+
+- SafeRoute phone-to-phone transfer
+- Bengaluru-specific road behavior
+- different phone mounts
+- different road surfaces
+- real speed dependence
+- live device calibration
+
+## Small SafeRoute-specific calibration path
+
+The pipeline is ready for later addition of a local labelled dataset with a format such as:
+
+```
+ride_id,timestamp,label,accel_mean_x,...,gps_speedMps
+```
+
+or a JSON row-per-window format where each row includes the exact SafeRoute feature values alongside the label and ride/session metadata.
+
+This allows a small SafeRoute-specific calibration set to be added without rewriting the model architecture.
+
+## Summary
+
+The ML boundary is in place, the feature extractor is canonical, the dataset conversion path is defined, and the inference/hazard integration is working structurally. The remaining blocker is not implementation work; it is the absence of a legitimate real labelled dataset that can be downloaded and reused in this environment.

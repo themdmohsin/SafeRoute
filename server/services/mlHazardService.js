@@ -16,12 +16,20 @@ export function asConfidence(value) {
   return Math.min(1, Math.max(0, numericValue));
 }
 
-export async function loadModelArtifact() {
-  if (cachedArtifact) return cachedArtifact;
+export async function loadModelArtifact(artifactLocation = artifactPath) {
+  if (cachedArtifact && artifactLocation === artifactPath) return cachedArtifact;
 
-  const rawArtifact = await fs.readFile(artifactPath, 'utf8');
-  cachedArtifact = JSON.parse(rawArtifact);
-  return cachedArtifact;
+  try {
+    const rawArtifact = await fs.readFile(artifactLocation, 'utf8');
+    const parsedArtifact = JSON.parse(rawArtifact);
+    if (parsedArtifact.status === 'training-blocked' || !parsedArtifact.model) {
+      throw new Error('No valid ML model artifact is available. Real labelled dataset training is required before inference can run.');
+    }
+    if (artifactLocation === artifactPath) cachedArtifact = parsedArtifact;
+    return parsedArtifact;
+  } catch (error) {
+    throw new Error(`No valid ML model artifact is available. Real labelled dataset training is required before inference can run. ${error.message}`);
+  }
 }
 
 export function getHazardThreshold() {
@@ -38,12 +46,12 @@ export function imputeMissingValues(values, medians = []) {
   });
 }
 
-export async function inferWindow(window = {}) {
+export async function inferWindow(window = {}, options = {}) {
   if (!window || typeof window !== 'object') {
     throw new Error('A telemetry window object is required for inference.');
   }
 
-  const artifact = await loadModelArtifact();
+  const artifact = await loadModelArtifact(options.modelPath || artifactPath);
   const model = RandomForestClassifier.load(artifact.model);
   const featureVector = buildFeatureVector(window);
   const imputedVector = imputeMissingValues(featureVector, artifact.medians ?? Array(FEATURE_NAMES.length).fill(0));
