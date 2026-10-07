@@ -18,7 +18,9 @@ app.use(cors({
     return callback(new Error('Origin is not allowed by CORS.'));
   },
 }));
-app.use(express.json());
+// 1 MB so a full ride-telemetry batch (up to 120 sensor windows) fits;
+// every other endpoint still validates payload shape explicitly.
+app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/hazards', hazardRoutes);
