@@ -1,495 +1,375 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
-import Toast from '../components/Toast.tsx';
+import HazardMap, { type MapHazard } from '../components/HazardMap.tsx';
 import { apiRequest } from '../lib/api';
+import { useAuth } from '../auth/AuthContext';
+import { BENGALURU, distanceM, distanceToLineM, pathLengthKm, reverseGeocode, speak, type LatLng } from '../lib/geo';
+import { AUTODETECT_KEY, PLAN_KEY, TRACK_KEY, hazardPoint, readJson, type RidePlan } from '../lib/ridePlan';
+import { sampleFromEvent, summarizeWindow, type MotionSample } from '../lib/sensorWindow';
+
+const WARN_M = 200;
+const PASSED_M = 30;
+const QUICK_TAGS = [
+  { label: 'Pothole', type: 'pothole', icon: 'circle' },
+  { label: 'Waterlog', type: 'waterlogging', icon: 'water' },
+  { label: 'Open manhole', type: 'open_manhole', icon: 'construction' },
+  { label: 'Unmarked bump', type: 'speed_breaker', icon: 'speed' },
+];
+type MotionPermission = { requestPermission?: () => Promise<'granted' | 'denied'> };
 
 export default function ActiveRideScreen() {
   const navigate = useNavigate();
-
+  const { user } = useAuth();
+  const rideId = localStorage.getItem('saferoute_active_ride_id');
+  const [plan, setPlan] = useState<RidePlan | null>(() => readJson<RidePlan>(PLAN_KEY));
+  const [track, setTrack] = useState<LatLng[]>(() => readJson<LatLng[]>(TRACK_KEY) || []);
+  const [pos, setPos] = useState<LatLng | null>(null);
+  const [speedKmh, setSpeedKmh] = useState<number | null>(null);
+  const [gpsError, setGpsError] = useState('');
+  const [road, setRoad] = useState('');
+  const [hazards, setHazards] = useState<MapHazard[]>([]);
   const [secondsElapsed, setSecondsElapsed] = useState(0);
-  const [voiceActive, setVoiceActive] = useState(true);
+  const [voiceActive, setVoiceActive] = useState(user?.preferences?.audibleAlerts ?? true);
+  const [passed, setPassed] = useState<string[]>([]);
+  const [mlDetections, setMlDetections] = useState(0);
+  const [sensorState, setSensorState] = useState<'off' | 'needs-permission' | 'on' | 'unsupported'>('off');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState<{ title: string; sub?: string } | null>(null);
+  const announced = useRef(new Set<string>());
+  const lastGeocode = useRef<{ at: number; p: LatLng } | null>(null);
+  const posRef = useRef<LatLng | null>(null);
+  const speedRef = useRef<number | null>(null);
 
-  const [toastMessage, setToastMessage] = useState('');
-  const [toastSubtitle, setToastSubtitle] = useState('');
-  const [showToast, setShowToast] = useState(false);
-
-  useEffect(() => {
-    const startTime = Date.parse(localStorage.getItem('saferoute_active_ride_start_time') || '');
-    if (!Number.isNaN(startTime)) setSecondsElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
-    const timer = setInterval(() => {
-      if (!Number.isNaN(startTime)) setSecondsElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  const formatTime = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  const notify = (title: string, sub?: string) => {
+    setToast({ title, sub });
+    window.setTimeout(() => setToast(null), 3500);
   };
 
-  const triggerQuickTag = (type: string) => {
-    setToastMessage(`${type} preview is not connected to live location or routing.`);
-    setToastSubtitle('Use the report form to save a hazard with your device location.');
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+  const loadHazards = () => apiRequest<{ hazards: MapHazard[] }>('/hazards?limit=100')
+    .then((r) => setHazards(r.hazards))
+    .catch((e) => notify(e instanceof Error ? e.message : 'Could not load hazards.'));
+
+  useEffect(() => {
+    if (!rideId) return undefined;
+    loadHazards();
+    const startTime = Date.parse(localStorage.getItem('saferoute_active_ride_start_time') || '');
+    const tick = () => { if (!Number.isNaN(startTime)) setSecondsElapsed(Math.max(0, Math.floor((Date.now() - startTime) / 1000))); };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [rideId]);
+
+  // Live GPS: position, speed, recorded track, current road name.
+  useEffect(() => {
+    if (!rideId) return undefined;
+    if (!navigator.geolocation) { setGpsError('This browser has no GPS access.'); return undefined; }
+    const id = navigator.geolocation.watchPosition(
+      (p) => {
+        const here = { lat: p.coords.latitude, lng: p.coords.longitude };
+        setGpsError('');
+        setPos(here);
+        posRef.current = here;
+        const kmh = p.coords.speed != null ? p.coords.speed * 3.6 : null;
+        setSpeedKmh(kmh);
+        speedRef.current = p.coords.speed;
+        setTrack((t) => {
+          if (t.length && distanceM(t[t.length - 1], here) < 5) return t; // ignore GPS jitter
+          const next = [...t, here];
+          localStorage.setItem(TRACK_KEY, JSON.stringify(next));
+          return next;
+        });
+        const last = lastGeocode.current;
+        if (!last || (Date.now() - last.at > 30000 && distanceM(last.p, here) > 100)) {
+          lastGeocode.current = { at: Date.now(), p: here };
+          reverseGeocode(here).then((place) => setRoad(place.roadName || place.area));
+        }
+      },
+      () => setGpsError('Allow location access to track this ride.'),
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [rideId]);
+
+  const route = plan?.routes[plan.selected]?.path || null;
+  const openHazards = hazards.filter((h) => h.status !== 'resolved');
+
+  // Nearest open hazard on the planned route (or anywhere within 1 km on a free ride).
+  const nextHazard = useMemo(() => {
+    if (!pos) return null;
+    const candidates = openHazards
+      .filter((h) => !passed.includes(h._id) && (!route || distanceToLineM(hazardPoint(h), route) <= 40))
+      .map((h) => ({ h, d: distanceM(pos, hazardPoint(h)) }))
+      .filter(({ d }) => d <= 1000)
+      .sort((a, b) => a.d - b.d);
+    return candidates[0] || null;
+  }, [pos, hazards, passed, route]);
+
+  // Warn once per hazard, and count it as passed when we get close.
+  useEffect(() => {
+    if (!nextHazard) return;
+    const { h, d } = nextHazard;
+    const name = h.hazardType.replaceAll('_', ' ');
+    if (d <= WARN_M && !announced.current.has(h._id)) {
+      announced.current.add(h._id);
+      if (voiceActive) speak(`Caution. ${h.severity} severity ${name} in ${Math.round(d / 10) * 10} metres.`);
+      notify(`${name} ahead in ${Math.round(d)} m`, `${h.severity} severity, reported by riders.`);
+    }
+    if (d <= PASSED_M) setPassed((list) => (list.includes(h._id) ? list : [...list, h._id]));
+  }, [nextHazard, voiceActive]);
+
+  // Auto-detect: 2-second motion windows go to the ML model when there is a jolt.
+  const startSensors = async () => {
+    if (typeof DeviceMotionEvent === 'undefined') { setSensorState('unsupported'); return; }
+    const ctor = DeviceMotionEvent as unknown as MotionPermission;
+    if (ctor.requestPermission) {
+      try {
+        if ((await ctor.requestPermission()) !== 'granted') { setSensorState('needs-permission'); return; }
+      } catch { setSensorState('needs-permission'); return; }
+    }
+    setSensorState('on');
+  };
+
+  useEffect(() => {
+    if (!rideId || localStorage.getItem(AUTODETECT_KEY) === 'false') return;
+    const ctor = typeof DeviceMotionEvent === 'undefined' ? null : (DeviceMotionEvent as unknown as MotionPermission);
+    if (!ctor) setSensorState('unsupported');
+    else if (ctor.requestPermission) setSensorState('needs-permission'); // iOS: needs a tap
+    else setSensorState('on');
+  }, [rideId]);
+
+  useEffect(() => {
+    if (sensorState !== 'on') return undefined;
+    let samples: MotionSample[] = [];
+    let startedAt = Date.now();
+    let seq = 0;
+    const onMotion = (e: DeviceMotionEvent) => { const s = sampleFromEvent(e); if (s) samples.push(s); };
+    window.addEventListener('devicemotion', onMotion);
+    const timer = window.setInterval(() => {
+      const batch = samples; const from = startedAt;
+      samples = []; startedAt = Date.now();
+      const here = posRef.current;
+      if (batch.length < 20 || !here) return;
+      const summary = summarizeWindow(batch);
+      if (summary.accel.magnitude.max < 2.5) return; // smooth road: skip the network call
+      seq += 1;
+      apiRequest<{ createdHazard: boolean; prediction: { label: string; confidence: number } }>('/ml/hazard', {
+        method: 'POST',
+        body: {
+          window: {
+            schemaVersion: 1, windowId: `${rideId}-${seq}`, rideId, seq,
+            startedAt: new Date(from).toISOString(), endedAt: new Date().toISOString(), durationMs: Date.now() - from,
+            gps: { lat: here.lat, lng: here.lng, speedMps: speedRef.current ?? undefined },
+            ...summary,
+          },
+        },
+      }).then((r) => {
+        if (!r.createdHazard) return;
+        setMlDetections((n) => n + 1);
+        notify(`Auto-detected ${r.prediction.label.replaceAll('_', ' ')}`, `Saved at ${(r.prediction.confidence * 100).toFixed(0)}% confidence.`);
+        loadHazards();
+      }).catch(() => undefined);
+    }, 2000);
+    return () => { window.removeEventListener('devicemotion', onMotion); window.clearInterval(timer); };
+  }, [sensorState, rideId]);
+
+  const quickTag = async (tag: typeof QUICK_TAGS[number]) => {
+    const here = posRef.current;
+    if (!here) { notify('Waiting for GPS', 'Your location is needed to pin the hazard.'); return; }
+    try {
+      const place = await reverseGeocode(here);
+      await apiRequest('/hazards', {
+        method: 'POST',
+        body: {
+          hazardType: tag.type,
+          severity: 'medium',
+          description: `${tag.label} tagged during a ride.`,
+          location: { type: 'Point', coordinates: [here.lng, here.lat] },
+          ...place,
+          source: 'manual',
+        },
+      });
+      const count = Number(localStorage.getItem('saferoute_active_ride_reports') || 0) + 1;
+      localStorage.setItem('saferoute_active_ride_reports', String(count));
+      notify(`${tag.label} saved`, place.roadName ? `On ${place.roadName}.` : 'At your current location.');
+      loadHazards();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not save the hazard.');
+    }
+  };
+
+  const reroute = () => {
+    if (!plan || plan.routes.length < 2) { notify('No other route', 'Search again from Start Ride to get alternatives.'); return; }
+    const next = { ...plan, selected: (plan.selected + 1) % plan.routes.length };
+    setPlan(next);
+    localStorage.setItem(PLAN_KEY, JSON.stringify(next));
+    const r = next.routes[next.selected];
+    notify(`Switched to ${next.selected === 0 ? 'safest route' : `alternative ${next.selected}`}`, `${r.distanceKm.toFixed(1)} km, ${r.hazardCount} hazards on route.`);
   };
 
   const handleConfirmSave = async () => {
     setIsSaving(true);
     try {
-      const rideId = localStorage.getItem('saferoute_active_ride_id');
       if (!rideId) throw new Error('No active ride session was found. Start a new ride first.');
+      // Keep at most 5000 points (server limit) by taking every nth point.
+      const step = Math.ceil(track.length / 5000) || 1;
       await apiRequest(`/rides/${rideId}`, {
         method: 'PATCH',
         body: {
-          distanceKm: 0,
+          distanceKm: Math.round(pathLengthKm(track) * 100) / 100,
           durationMinutes: Math.round(secondsElapsed / 60),
-          hazardsDetectedCount: 0,
+          hazardsDetectedCount: passed.length + mlDetections,
           hazardsReportedCount: Number(localStorage.getItem('saferoute_active_ride_reports') || 0),
+          safetyScore: Math.max(0, 100 - passed.length * 10),
+          // Profile setting "Save ride GPS tracks" off: keep totals, drop the path.
+          route: user?.preferences?.anonymousTelemetry === false ? [] : track.filter((_, i) => i % step === 0),
         },
       });
       localStorage.setItem('saferoute_summary_ride_id', rideId);
-      localStorage.removeItem('saferoute_active_ride_id');
-      localStorage.removeItem('saferoute_active_ride_start_time');
-      localStorage.removeItem('saferoute_active_ride_reports');
-      setIsModalOpen(false);
+      ['saferoute_active_ride_id', 'saferoute_active_ride_start_time', 'saferoute_active_ride_reports', PLAN_KEY, TRACK_KEY, AUTODETECT_KEY]
+        .forEach((key) => localStorage.removeItem(key));
       navigate('/ride/summary');
     } catch (error) {
-      setToastMessage(error instanceof Error ? error.message : 'Unable to save this ride.');
-      setToastSubtitle('Check your connection and try again.');
-      setShowToast(true);
+      notify(error instanceof Error ? error.message : 'Unable to save this ride.', 'Check your connection and try again.');
     } finally {
       setIsSaving(false);
     }
   };
 
+  if (!rideId) {
+    return (
+      <div className="min-h-screen flex flex-col bg-surface">
+        <AppHeader title="Active Ride" variant="main" />
+        <main className="flex-1 grid place-items-center p-6 text-center">
+          <div>
+            <p className="font-bold text-primary text-lg">No ride in progress</p>
+            <p className="text-sm text-secondary mt-1">Start a ride to track distance, speed and hazards.</p>
+            <button onClick={() => navigate('/ride/start')} className="mt-4 rounded-xl bg-primary text-on-primary px-5 py-3 font-semibold cursor-pointer">Go to Start Ride</button>
+          </div>
+        </main>
+        <BottomNav />
+      </div>
+    );
+  }
+
+  const mins = Math.floor(secondsElapsed / 60);
+  const secs = secondsElapsed % 60;
+  const km = pathLengthKm(track);
+  const btn = 'cursor-pointer active:scale-95 transition-transform';
+
   return (
-    <div className="bg-primary-container text-surface pt-safe pb-safe antialiased min-h-screen flex flex-col selection:bg-secondary-container">
-      {/* Header title FIXED to "Active Ride" */}
+    <div className="bg-surface min-h-screen flex flex-col">
       <AppHeader title="Active Ride" variant="main" />
-
-      <main className="flex-1 flex flex-col relative w-full pt-16 pb-24 bg-surface max-w-lg mx-auto">
-        <div className="flex flex-col w-full relative select-none overflow-hidden pb-6">
-          {/* Map Engine Canvas Simulation */}
-          <div className="relative w-full h-[760px] overflow-hidden rounded-3xl bg-primary shadow-2xl">
-            {/* Map Background Image */}
-            <div
-              className="absolute inset-0 bg-cover bg-center scale-105 transition-transform duration-1000"
-              style={{
-                backgroundImage: `url('https://lh3.googleusercontent.com/aida-public/AB6AXuDXgDlUFV5WTGlv91RTRsiJpkSqInVjAsgVzn-PflvT2Cu5NSzmCJUurc_zfSos2YcxVbB36bbx--K050vRePXW1wNFr50XsoPIo1GidYWnjcjhTih0u9pnH2Y-o9loO5-J_k3GJ_YhIjQoqO-XP_NI7SP3aXJ3iKcVSbIkti-94K4LEnkAKzJyEvjzeO7hq30sUDzB6V6CXtk1EJSL08bni0Vx1pqlRCeJG8DHfof_mHd97aS6gybJ')`,
-              }}
-            ></div>
-
-            {/* Map Glow Gradient Overlays */}
-            <div className="absolute inset-0 bg-gradient-to-b from-primary/80 via-transparent to-primary/90 pointer-events-none"></div>
-
-            {/* SVG Navigation Path & Dynamic Guidance */}
-            <svg
-              className="absolute inset-0 w-full h-full pointer-events-none"
-              fill="none"
-              viewBox="0 0 400 760"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <defs>
-                <filter height="140%" id="glow" width="140%" x="-20%" y="-20%">
-                  <feGaussianBlur result="blur" stdDeviation="6"></feGaussianBlur>
-                  <feMerge>
-                    <feMergeNode in="blur"></feMergeNode>
-                    <feMergeNode in="SourceGraphic"></feMergeNode>
-                  </feMerge>
-                </filter>
-                <linearGradient id="routeGradient" x1="0" x2="0" y1="1" y2="0">
-                  <stop offset="0%" stopColor="#dd9202"></stop>
-                  <stop offset="50%" stopColor="#ffb955"></stop>
-                  <stop offset="100%" stopColor="#d8e2ff"></stop>
-                </linearGradient>
-              </defs>
-
-              {/* Outer Pulse Path */}
-              <path
-                d="M 200 660 L 205 530 L 235 410 L 220 310 L 150 250 L 140 180"
-                stroke="#dd9202"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeOpacity="0.35"
-                strokeWidth="12"
-              ></path>
-
-              {/* Core Active Glowing Polyline */}
-              <path
-                d="M 200 660 L 205 530 L 235 410 L 220 310 L 150 250 L 140 180"
-                filter="url(#glow)"
-                stroke="url(#routeGradient)"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="6"
-              ></path>
-
-              {/* Animated Direction Dashes */}
-              <path
-                d="M 200 660 L 205 530 L 235 410 L 220 310 L 150 250 L 140 180"
-                opacity="0.85"
-                stroke="#ffffff"
-                strokeDasharray="8 16"
-                strokeLinecap="round"
-                strokeWidth="3"
-              >
-                <animate attributeName="stroke-dashoffset" dur="1.8s" repeatCount="indefinite" values="48;0"></animate>
-              </path>
-
-              {/* Radar Pulse Waves from Vehicle */}
-              <circle cx="205" cy="530" fill="#8ba2d5" fillOpacity="0.18" r="32">
-                <animate attributeName="r" dur="2s" repeatCount="indefinite" values="16;44"></animate>
-                <animate attributeName="opacity" dur="2s" repeatCount="indefinite" values="0.7;0"></animate>
-              </circle>
-            </svg>
-
-            <div className="absolute top-20 left-3 right-3 z-30 rounded-xl bg-black/70 px-3 py-2 text-center text-xs font-semibold text-white">
-              Illustrative map preview; live GPS, speed, and routing are not connected.
-            </div>
-            {/* Illustrative vehicle marker */}
-            <div className="absolute left-[183px] top-[508px] flex items-center justify-center pointer-events-none z-20">
-              <div className="relative flex items-center justify-center w-11 h-11 bg-primary-container rounded-full shadow-xl ring-4 ring-primary-fixed-dim/40">
-                <span
-                  className="material-symbols-outlined text-primary-fixed text-2xl transform rotate-[-8deg]"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  navigation
-                </span>
-                <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-surface-container-lowest rounded-full flex items-center justify-center shadow">
-                  <div className="w-2 h-2 rounded-full bg-on-tertiary-container animate-ping"></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Pin 1: Pothole */}
-            <div className="absolute left-[138px] top-[390px] z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/95 backdrop-blur-md shadow-lg transform -translate-x-1/2 -translate-y-1/2 border border-outline-variant/20">
-              <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
-              <span className="font-label-sm text-error font-bold flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  warning
-                </span>
-                Pothole 180m
-              </span>
-            </div>
-
-            {/* Pin 2: Waterlogging */}
-            <div className="absolute left-[285px] top-[290px] z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/95 backdrop-blur-md shadow-lg transform -translate-x-1/2 -translate-y-1/2 border border-outline-variant/20">
-              <span className="w-2 h-2 rounded-full bg-surface-tint"></span>
-              <span className="font-label-sm text-primary-container font-bold flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  water_damage
-                </span>
-                Waterlogging 400m
-              </span>
-            </div>
-
-            {/* Pin 3: Unmarked Bump */}
-            <div className="absolute left-[92px] top-[232px] z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container-lowest/95 backdrop-blur-md shadow-lg transform -translate-x-1/2 -translate-y-1/2 border border-outline-variant/20">
-              <span className="w-2 h-2 rounded-full bg-tertiary-fixed-dim"></span>
-              <span className="font-label-sm text-on-tertiary-fixed-variant font-bold flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  traffic
-                </span>
-                Unmarked Bump
-              </span>
-            </div>
-
-            {/* Map Orientation Toggles */}
-            <div className="absolute right-4 top-56 z-20 flex flex-col gap-2.5">
-              <button
-                aria-label="Recenter Map"
-                onClick={() => triggerQuickTag('Vehicle centered on Koramangala corridor')}
-                className="w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-xl">my_location</span>
-              </button>
-              <button
-                aria-label="Layers"
-                onClick={() => triggerQuickTag('Hazard Heatmap Overlay')}
-                className="w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-xl">layers</span>
-              </button>
-              <button
-                aria-label="Sound Toggle"
-                onClick={() => setVoiceActive(!voiceActive)}
-                className="w-10 h-10 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md text-on-surface flex items-center justify-center shadow-md active:scale-95 transition-transform cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-xl">
-                  {voiceActive ? 'volume_up' : 'volume_off'}
-                </span>
-              </button>
-            </div>
-
-            {/* TOP HUD OVERLAY: Turn Cue & Live Metrics Card */}
-            <div className="absolute top-3 inset-x-3 z-30 flex flex-col gap-2.5">
-              {/* Turn Navigation Cue HUD */}
-              <div className="w-full bg-primary/95 backdrop-blur-xl text-on-primary rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5 border border-outline-variant/15">
-                <div className="w-12 h-12 rounded-xl bg-primary-fixed text-on-primary-fixed flex items-center justify-center flex-shrink-0 shadow-inner">
-                  <span className="material-symbols-outlined text-3xl font-bold">turn_right</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline justify-between gap-1">
-                    <span className="font-display text-headline-md tracking-tight font-extrabold text-on-primary truncate">
-                      In 350m
-                    </span>
-                    <span className="font-label-md text-tertiary-fixed font-bold bg-tertiary-container px-2 py-0.5 rounded-md flex-shrink-0">
-                      CRATER WARNING
-                    </span>
-                  </div>
-                  <p className="font-body-md text-primary-fixed text-xs sm:text-sm font-medium line-clamp-1">
-                    Caution severe crater near Sony World Signal
-                  </p>
-                </div>
-              </div>
-
-              {/* Live Telemetry Glass Matrix */}
-              <div className="w-full bg-surface-container-lowest/90 backdrop-blur-xl rounded-2xl p-3 shadow-lg flex items-center justify-between border border-outline-variant/15">
-                {/* Metric 1: Distance */}
-                <div className="flex flex-col items-center flex-1 px-1">
-                  <span className="font-label-sm text-secondary uppercase font-semibold">Distance</span>
-                  <div className="flex items-baseline gap-0.5 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-on-surface">—</span>
-                    <span className="font-label-sm text-secondary font-semibold">GPS off</span>
-                  </div>
-                </div>
-                <div className="w-px h-7 bg-outline-variant/50"></div>
-
-                {/* Metric 2: Elapsed Time */}
-                <div className="flex flex-col items-center flex-1 px-1">
-                  <span className="font-label-sm text-secondary uppercase font-semibold">Time</span>
-                  <div className="flex items-baseline gap-0.5 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-on-surface">
-                      {formatTime(secondsElapsed)}
-                    </span>
-                  </div>
-                </div>
-                <div className="w-px h-7 bg-outline-variant/50"></div>
-
-                {/* Metric 3: Hazards detected */}
-                <div className="flex flex-col items-center flex-1 px-1">
-                  <span className="font-label-sm text-secondary uppercase font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-error animate-ping"></span>
-                    Hazards
-                  </span>
-                  <div className="flex items-baseline gap-1 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-error">0</span>
-                    <span className="font-label-sm text-error font-semibold">Auto detect off</span>
-                  </div>
-                </div>
-                <div className="w-px h-7 bg-outline-variant/50"></div>
-
-                {/* Metric 4: Speed */}
-                <div className="flex flex-col items-center flex-1 px-1">
-                  <span className="font-label-sm text-secondary uppercase font-semibold">Speed</span>
-                  <div className="flex items-baseline gap-0.5 mt-0.5">
-                    <span className="font-display text-headline-sm font-extrabold text-primary-container">
-                      —
-                    </span>
-                    <span className="font-label-sm text-secondary font-semibold">GPS off</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Speed Limit Pill Overlay on Map */}
-            <div className="absolute left-4 bottom-28 z-20 flex items-center gap-2">
-              <div className="w-11 h-11 rounded-full bg-surface-container-lowest text-error flex flex-col items-center justify-center shadow-lg ring-2 ring-error">
-                <span className="font-label-sm text-[8px] leading-none font-bold uppercase text-secondary">Limit</span>
-                <span className="font-display text-label-lg font-black text-on-surface leading-tight">50</span>
-              </div>
-              <div className="px-3 py-1.5 rounded-xl bg-surface-container-lowest/90 backdrop-blur-md shadow-md border border-outline-variant/10">
-                <p className="font-label-sm text-secondary">Current Road</p>
-                <p className="font-headline-sm text-xs font-bold text-on-surface">Koramangala 80ft Rd</p>
-              </div>
-            </div>
-
-            {/* FLOATING ACTION BUTTON: Quick 1-Tap Hazard Report -> /report */}
-            <div className="absolute right-4 bottom-24 z-30">
-              <button
-                id="floating-report-btn"
-                aria-label="Instant Hazard Report"
-                onClick={() => navigate('/report')}
-                className="group relative flex items-center justify-center w-16 h-16 rounded-full bg-on-tertiary-container text-on-primary shadow-2xl active:scale-90 transition-all duration-200 focus:outline-none cursor-pointer"
-              >
-                <span className="absolute -inset-2 rounded-full bg-on-tertiary-container/30 animate-ping pointer-events-none"></span>
-                <span className="absolute -inset-1 rounded-full bg-tertiary-fixed-dim/40 blur-sm pointer-events-none"></span>
-                <div className="relative flex flex-col items-center justify-center">
-                  <span
-                    className="material-symbols-outlined text-2xl font-bold text-surface-container-lowest"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    add_alert
-                  </span>
-                  <span className="font-label-sm text-[9px] font-extrabold tracking-tight uppercase text-surface-container-lowest leading-none mt-0.5">
-                    Report
-                  </span>
-                </div>
-              </button>
-            </div>
-
-            {/* BOTTOM CONTROL SHEET HUD */}
-            <div className="absolute inset-x-0 bottom-0 z-30 p-3 pt-2 bg-gradient-to-t from-primary via-primary/95 to-transparent">
-              <div className="bg-surface-container-lowest/95 backdrop-blur-xl rounded-2xl p-3 shadow-2xl flex flex-col gap-2.5 border border-outline-variant/10">
-                {/* Live Hazard Quick-Tagger Tray */}
-                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
-                  <button
-                    onClick={() => triggerQuickTag('Pothole')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-tertiary-fixed-dim"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      circle
-                    </span>
-                    Pothole
-                  </button>
-                  <button
-                    onClick={() => triggerQuickTag('Waterlog')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-surface-tint"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      water
-                    </span>
-                    Waterlog
-                  </button>
-                  <button
-                    onClick={() => triggerQuickTag('Road Work')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-error"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      construction
-                    </span>
-                    Road Work
-                  </button>
-                  <button
-                    onClick={() => triggerQuickTag('Unmarked Bump')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-label-md hover:bg-surface-container active:scale-95 transition-all flex-shrink-0 cursor-pointer"
-                  >
-                    <span
-                      className="material-symbols-outlined text-sm text-secondary"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      speed
-                    </span>
-                    Unmarked Bump
-                  </button>
-                </div>
-
-                {/* Primary Action Tier: Guidance Status & End Ride Button */}
-                <div className="flex items-center gap-2.5 pt-1">
-                  {/* Voice Navigation Status Pill */}
-                  <button
-                    aria-label="Toggle Navigation Audio"
-                    onClick={() => setVoiceActive(!voiceActive)}
-                    className={`h-12 px-3.5 rounded-xl bg-surface-container text-on-surface flex items-center justify-center gap-2 hover:bg-surface-variant active:scale-95 transition-transform flex-shrink-0 cursor-pointer ${
-                      !voiceActive ? 'opacity-50' : ''
-                    }`}
-                    id="voice-toggle-btn"
-                  >
-                    <span className="material-symbols-outlined text-primary-container text-xl" id="voice-icon">
-                      {voiceActive ? 'record_voice_over' : 'voice_over_off'}
-                    </span>
-                    <span className="font-label-sm text-xs font-bold text-primary-container hidden sm:inline">
-                      {voiceActive ? 'Voice On' : 'Voice Off'}
-                    </span>
-                  </button>
-
-                  {/* Reroute Button */}
-                  <button
-                    aria-label="Alternative Safer Route"
-                    onClick={() => triggerQuickTag('Rerouting via Inner Ring Road')}
-                    className="h-12 w-12 rounded-xl bg-secondary-container text-on-secondary-container flex items-center justify-center hover:opacity-90 active:scale-95 transition-transform flex-shrink-0 cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-xl">alt_route</span>
-                  </button>
-
-                  {/* Urgent Primary End Ride Button */}
-                  <button
-                    id="end-ride-trigger"
-                    onClick={() => setIsModalOpen(true)}
-                    className="flex-1 h-12 px-4 rounded-xl bg-error text-on-error flex items-center justify-center gap-2 font-label-lg font-bold shadow-md hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer"
-                  >
-                    <span className="material-symbols-outlined text-xl" style={{ fontVariationSettings: "'FILL' 1" }}>
-                      stop_circle
-                    </span>
-                    <span className="tracking-wide">End & Save Ride</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Confirm End Ride Modal Sheet */}
-            {isModalOpen && (
-              <div
-                id="end-confirm-modal"
-                className="absolute inset-0 z-50 bg-primary/70 backdrop-blur-sm flex items-end justify-center p-4 animate-in fade-in"
-              >
-                <div className="w-full bg-surface-container-lowest rounded-3xl p-5 shadow-2xl flex flex-col gap-4 border border-outline-variant/20 animate-in slide-in-from-bottom-5">
-                  <div className="flex items-center gap-3 text-on-surface">
-                    <div className="w-12 h-12 rounded-2xl bg-error-container text-on-error-container flex items-center justify-center shrink-0">
-                      <span className="material-symbols-outlined text-2xl">flag_circle</span>
-                    </div>
-                    <div>
-                      <h3 className="font-headline-sm font-bold text-on-surface">Finish Ride & Save Stats?</h3>
-                      <p className="font-body-sm text-secondary">Distance and automatic hazard detection are not available without device tracking.</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      id="cancel-end-btn"
-                      onClick={() => setIsModalOpen(false)}
-                      className="h-12 rounded-xl bg-surface-container-high text-on-surface font-label-lg font-semibold active:scale-95 transition-transform cursor-pointer"
-                    >
-                      Resume
-                    </button>
-                    <button
-                      id="confirm-save-btn"
-                      onClick={handleConfirmSave}
-                      disabled={isSaving}
-                      className="h-12 rounded-xl bg-error text-on-error font-label-lg font-bold shadow-md active:scale-95 transition-transform cursor-pointer flex items-center justify-center gap-1 disabled:opacity-80"
-                    >
-                      {isSaving && <span className="material-symbols-outlined animate-spin text-[18px]">sync</span>}
-                      <span>{isSaving ? 'Saving...' : 'Yes, Save & Exit'}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Quick Report Notification Toast */}
-            {showToast && (
-              <div
-                id="report-toast"
-                className="absolute top-28 inset-x-6 z-40 bg-on-secondary-fixed text-surface-bright rounded-2xl p-3 shadow-2xl flex items-center gap-3 transition-all duration-300 border border-outline-variant/20 animate-in fade-in slide-in-from-top-2"
-              >
-                <div className="w-8 h-8 rounded-full bg-on-tertiary-container flex items-center justify-center text-on-primary shrink-0">
-                  <span className="material-symbols-outlined text-base">check</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-label-md text-xs font-bold text-surface-container-lowest">{toastMessage}</p>
-                  <p className="font-body-sm text-[11px] text-surface-variant">{toastSubtitle}</p>
-                </div>
-              </div>
-            )}
+      <main className="flex-1 flex flex-col w-full pt-16 pb-24 max-w-lg mx-auto">
+        {/* Next-hazard cue */}
+        <div className="m-3 rounded-2xl bg-primary text-on-primary p-3 flex items-center gap-3 shadow">
+          <span className="material-symbols-outlined text-3xl">{nextHazard ? 'warning' : 'verified_user'}</span>
+          <div className="min-w-0">
+            <p className="font-extrabold text-lg leading-tight">
+              {nextHazard ? `${nextHazard.h.hazardType.replaceAll('_', ' ')} in ${Math.round(nextHazard.d)} m` : 'No reported hazards ahead'}
+            </p>
+            <p className="text-xs text-primary-fixed truncate">
+              {gpsError || (nextHazard ? `${nextHazard.h.severity} severity · ${nextHazard.h.description}` : plan?.destination ? `Heading to ${plan.destination}` : 'Free ride')}
+            </p>
           </div>
         </div>
-      </main>
 
+        {/* Live metrics */}
+        <div className="mx-3 mb-3 grid grid-cols-4 rounded-2xl bg-surface-container-low p-2 text-center">
+          {[
+            ['Distance', `${km.toFixed(2)} km`],
+            ['Time', `${mins}:${String(secs).padStart(2, '0')}`],
+            ['Hazards', String(passed.length + mlDetections)],
+            ['Speed', speedKmh == null ? '—' : `${Math.round(speedKmh)} km/h`],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <p className="text-[11px] text-secondary font-semibold">{label}</p>
+              <p className="font-bold text-on-surface">{value}</p>
+            </div>
+          ))}
+        </div>
+
+        <HazardMap
+          center={pos || BENGALURU}
+          user={pos}
+          hazards={hazards}
+          paths={[...(route ? [{ points: route, color: '#0369a1', width: 6, dashed: true }] : []), { points: track, color: '#dd9202', width: 5 }]}
+          className="h-[360px]"
+          initialZoom={16}
+          onRecenter={() => { if (!posRef.current) notify('Waiting for GPS', 'Allow location access to follow your position.'); }}
+        >
+          {road && <div className="absolute left-3 top-3 z-10 rounded-xl bg-white/95 px-3 py-1.5 text-xs font-semibold shadow">On {road}</div>}
+          <button
+            aria-label="Report a hazard with details"
+            onClick={() => navigate('/report')}
+            className={`absolute left-3 bottom-8 z-10 w-14 h-14 rounded-full bg-on-tertiary-container text-white shadow-xl flex flex-col items-center justify-center ${btn}`}
+          >
+            <span className="material-symbols-outlined">add_alert</span>
+            <span className="text-[9px] font-bold">Report</span>
+          </button>
+        </HazardMap>
+
+        <div className="m-3 flex flex-col gap-2.5">
+          <div className="flex gap-2 overflow-x-auto no-scrollbar">
+            {QUICK_TAGS.map((tag) => (
+              <button key={tag.type} onClick={() => quickTag(tag)} className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full bg-surface-container-high text-xs font-semibold ${btn}`}>
+                <span className="material-symbols-outlined text-sm">{tag.icon}</span>{tag.label}
+              </button>
+            ))}
+          </div>
+
+          {sensorState === 'needs-permission' && (
+            <button onClick={startSensors} className={`rounded-xl bg-secondary-container px-3 py-2 text-sm font-semibold ${btn}`}>Allow motion sensors for auto-detect</button>
+          )}
+          <p className="text-[11px] text-secondary">
+            Auto-detect: {sensorState === 'on' ? `listening (${mlDetections} found)` : sensorState === 'unsupported' ? 'this device has no motion sensors' : sensorState === 'needs-permission' ? 'waiting for permission' : 'off for this ride'}
+          </p>
+
+          <div className="flex gap-2.5">
+            <button
+              aria-label={voiceActive ? 'Turn voice alerts off' : 'Turn voice alerts on'}
+              aria-pressed={voiceActive}
+              onClick={() => { const next = !voiceActive; setVoiceActive(next); if (next) speak('Voice alerts on.'); }}
+              className={`h-12 px-3.5 rounded-xl bg-surface-container flex items-center gap-2 ${btn} ${voiceActive ? '' : 'opacity-60'}`}
+            >
+              <span className="material-symbols-outlined">{voiceActive ? 'record_voice_over' : 'voice_over_off'}</span>
+              <span className="text-xs font-bold">{voiceActive ? 'Voice on' : 'Voice off'}</span>
+            </button>
+            <button aria-label="Switch to another route" onClick={reroute} className={`h-12 w-12 rounded-xl bg-secondary-container flex items-center justify-center ${btn}`}>
+              <span className="material-symbols-outlined">alt_route</span>
+            </button>
+            <button onClick={() => setIsModalOpen(true)} className={`flex-1 h-12 rounded-xl bg-error text-on-error font-bold flex items-center justify-center gap-2 ${btn}`}>
+              <span className="material-symbols-outlined">stop_circle</span>End & save ride
+            </button>
+          </div>
+        </div>
+
+        {isModalOpen && (
+          <div className="fixed inset-0 z-[60] bg-primary/70 flex items-end justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="end-ride-title">
+            <div className="w-full max-w-lg bg-surface-container-lowest rounded-3xl p-5 flex flex-col gap-4">
+              <div>
+                <h3 id="end-ride-title" className="font-bold text-on-surface">Finish ride and save?</h3>
+                <p className="text-sm text-secondary">{km.toFixed(2)} km in {mins} min, {passed.length + mlDetections} hazards passed or detected.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5">
+                <button onClick={() => setIsModalOpen(false)} className={`h-12 rounded-xl bg-surface-container-high font-semibold ${btn}`}>Keep riding</button>
+                <button onClick={handleConfirmSave} disabled={isSaving} className={`h-12 rounded-xl bg-error text-on-error font-bold disabled:opacity-70 ${btn}`}>
+                  {isSaving ? 'Saving…' : 'Save & finish'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {toast && (
+          <div role="status" className="fixed top-20 inset-x-4 z-[60] mx-auto max-w-md rounded-2xl bg-on-secondary-fixed text-white p-3 shadow-2xl">
+            <p className="text-sm font-bold capitalize">{toast.title}</p>
+            {toast.sub && <p className="text-xs opacity-80">{toast.sub}</p>}
+          </div>
+        )}
+      </main>
       <BottomNav />
     </div>
   );

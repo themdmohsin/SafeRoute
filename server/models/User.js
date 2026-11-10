@@ -8,6 +8,17 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     role: { type: String, enum: ['commuter', 'admin'], default: 'commuter' },
     vehicleType: { type: String, trim: true, maxlength: 80 },
+    vehicleNumber: { type: String, trim: true, uppercase: true, maxlength: 20, default: '' },
+    homeArea: { type: String, trim: true, maxlength: 120, default: '' },
+    preferences: {
+      audibleAlerts: { type: Boolean, default: true },
+      autoDetect: { type: Boolean, default: true },
+      anonymousTelemetry: { type: Boolean, default: true },
+      nightMap: { type: Boolean, default: false },
+    },
+    notificationsSeenAt: { type: Date, default: () => new Date(0) },
+    resetTokenHash: { type: String, select: false, default: null },
+    resetTokenExpires: { type: Date, select: false, default: null },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

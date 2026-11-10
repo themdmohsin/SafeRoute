@@ -18,6 +18,7 @@ import ManualReportScreen from './pages/ManualReportScreen.tsx';
 import RideSummaryScreen from './pages/RideSummaryScreen.tsx';
 import DashboardScreen from './pages/DashboardScreen.tsx';
 import AdminScreen from './pages/AdminScreen.tsx';
+import ResetPasswordScreen from './pages/ResetPasswordScreen.tsx';
 import { AuthProvider } from './auth/AuthContext';
 import RequireAuth from './auth/RequireAuth';
 
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/splash" element={<SplashScreen />} />
         <Route path="/login" element={<LoginScreen />} />
         <Route path="/register" element={<RegisterScreen />} />
+        <Route path="/reset-password" element={<ResetPasswordScreen />} />
         <Route path="/home" element={privatePage(<HomeScreen />)} />
         <Route path="/profile" element={privatePage(<ProfileScreen />)} />
         <Route path="/ride/start" element={privatePage(<StartRideScreen />)} />

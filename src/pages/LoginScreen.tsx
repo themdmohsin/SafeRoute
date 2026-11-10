@@ -57,9 +57,6 @@ export default function LoginScreen() {
     }
   };
 
-  const triggerBiometrics = () => {
-    showNotification('Biometric sign-in is not configured. Please use your email and password.', 'info');
-  };
 
   return (
     <div className="bg-background font-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-secondary-container">
@@ -134,7 +131,7 @@ export default function LoginScreen() {
                   <button
                     type="button"
                     className="font-label-md text-label-md text-on-tertiary-container font-bold hover:underline cursor-pointer bg-transparent border-none p-0"
-                    onClick={() => showNotification('Password reset link dispatched via SMS & Email', 'mail')}
+                    onClick={() => navigate('/reset-password')}
                   >
                     Forgot password?
                   </button>
@@ -184,24 +181,6 @@ export default function LoginScreen() {
                 <span className="material-symbols-outlined text-[20px]">
                   {isSubmitting ? 'sync' : 'arrow_forward'}
                 </span>
-              </button>
-
-              {/* Divider Decoration */}
-              <div className="flex items-center gap-space-sm my-space-xs">
-                <div className="flex-1 h-px bg-surface-variant"></div>
-                <span className="font-label-sm text-label-sm text-outline uppercase tracking-wider">or verify instantly</span>
-                <div className="flex-1 h-px bg-surface-variant"></div>
-              </div>
-
-              {/* Biometric Quick-Action Pill */}
-              <button
-                className="w-full h-12 bg-secondary-container/60 hover:bg-secondary-container text-on-secondary-container font-label-md text-label-md rounded-2xl flex items-center justify-center gap-space-sm transition-all active:scale-[0.98] cursor-pointer"
-                onClick={triggerBiometrics}
-                type="button"
-              >
-                <span className="material-symbols-outlined text-primary text-[20px]">fingerprint</span>
-                <span className="font-medium">Face ID / Fingerprint login</span>
-                <span className="w-2 h-2 rounded-full bg-on-tertiary-container animate-ping ml-1"></span>
               </button>
             </form>
 

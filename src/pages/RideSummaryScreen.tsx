@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import Toast from '../components/Toast.tsx';
 import { apiRequest } from '../lib/api';
+import HazardMap, { type MapHazard } from '../components/HazardMap.tsx';
+import type { LatLng } from '../lib/geo';
 
 interface RideSummaryData {
   distanceKm: number;
@@ -10,6 +12,8 @@ interface RideSummaryData {
   hazardsDetectedCount: number;
   hazardsReportedCount: number;
   safetyScore: number;
+  destination?: string;
+  route?: LatLng[];
 }
 
 export default function RideSummaryScreen() {
@@ -23,6 +27,7 @@ export default function RideSummaryScreen() {
   const [isToastOpen, setIsToastOpen] = useState(false);
   const [ride, setRide] = useState<RideSummaryData | null>(null);
   const [rideError, setRideError] = useState('');
+  const [hazards, setHazards] = useState<MapHazard[]>([]);
 
   useEffect(() => {
     const rideId = localStorage.getItem('saferoute_summary_ride_id');
@@ -33,6 +38,7 @@ export default function RideSummaryScreen() {
     apiRequest<{ ride: RideSummaryData }>(`/rides/${rideId}`)
       .then(({ ride: completedRide }) => setRide(completedRide))
       .catch((error) => setRideError(error instanceof Error ? error.message : 'Unable to load ride summary.'));
+    apiRequest<{ hazards: MapHazard[] }>('/hazards?limit=100').then((r) => setHazards(r.hazards)).catch(() => undefined);
   }, []);
 
   const showToast = (msg: string, icon = 'check_circle') => {
@@ -120,10 +126,16 @@ export default function RideSummaryScreen() {
     };
   }, []);
 
+  const routePoints = ride?.route || [];
+  const shownRoute = routePoints.slice(0, Math.max(1, Math.ceil((routePoints.length * replayProgress) / 100)));
+
   const handleReplayRoute = () => {
+    if (routePoints.length < 2) {
+      showToast('No GPS track was recorded for this ride.', 'info');
+      return;
+    }
     setIsReplaying(true);
     setReplayProgress(0);
-    showToast('Showing an illustrative route preview; GPS route recording is not connected.', 'play_circle');
 
     let current = 0;
     const interval = setInterval(() => {
@@ -138,17 +150,19 @@ export default function RideSummaryScreen() {
     }, 50);
   };
 
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator
-        .share({
-          title: 'SafeRoute Commute Summary',
-          text: `I saved a SafeRoute ride: ${ride?.durationMinutes ?? 0} minutes, ${ride?.hazardsReportedCount ?? 0} reports submitted.`,
-          url: window.location.href,
-        })
-        .catch(() => showToast('Summary link copied to clipboard!', 'content_copy'));
-    } else {
-      showToast('Summary link copied to clipboard!', 'content_copy');
+  const handleShare = async () => {
+    const text = `My SafeRoute ride: ${ride?.distanceKm?.toFixed(1) ?? 0} km in ${ride?.durationMinutes ?? 0} min, safety score ${ride?.safetyScore ?? '—'}/100, ${ride?.hazardsReportedCount ?? 0} hazards reported.`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'SafeRoute ride summary', text });
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      showToast('Ride summary copied to your clipboard.', 'content_copy');
+    } catch (error) {
+      // AbortError = the user closed the share sheet; nothing to report.
+      if (error instanceof Error && error.name === 'AbortError') return;
+      showToast('Could not share or copy. Your browser blocked it.', 'error');
     }
   };
 
@@ -190,7 +204,7 @@ export default function RideSummaryScreen() {
               Safe Commute Finished!
             </h2>
             <p className="font-body-md text-secondary max-w-xs mt-1">
-              This session was saved to your account. Distance and automatic hazard detection were not recorded.
+              This ride was saved to your account with its GPS track and hazard counts.
             </p>
           </div>
 
@@ -206,7 +220,7 @@ export default function RideSummaryScreen() {
               <span className="font-display text-2xl font-bold text-on-surface">{ride && ride.distanceKm > 0 ? ride.distanceKm.toFixed(1) : '—'}</span>
                 <span className="font-label-md text-secondary">km</span>
               </div>
-              <span className="font-body-sm text-[11px] text-secondary mt-1">GPS distance not recorded</span>
+              <span className="font-body-sm text-[11px] text-secondary mt-1">Measured from your GPS track</span>
             </div>
 
             {/* Card 2: Duration */}
@@ -219,20 +233,22 @@ export default function RideSummaryScreen() {
                 <span className="font-display text-2xl font-bold text-on-surface">{ride?.durationMinutes ?? '—'}</span>
                 <span className="font-label-md text-secondary">minutes</span>
               </div>
-              <span className="font-body-sm text-[11px] text-secondary mt-1">GPS speed not recorded</span>
+              <span className="font-body-sm text-[11px] text-secondary mt-1">
+                {ride && ride.durationMinutes > 0 ? `Avg ${(ride.distanceKm / (ride.durationMinutes / 60)).toFixed(0)} km/h` : 'Average speed needs 1+ min'}
+              </span>
             </div>
 
             {/* Card 3: Potholes Avoided */}
             <div className="bg-surface-container-low p-4 rounded-2xl shadow-sm flex flex-col border border-outline-variant/10">
               <div className="flex items-center justify-between text-secondary mb-1">
-                <span className="font-label-sm uppercase font-semibold">Avoided</span>
+                <span className="font-label-sm uppercase font-semibold">Hazards</span>
                 <span className="material-symbols-outlined text-on-tertiary-container text-[18px]">security</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
                 <span className="font-display text-2xl font-bold text-on-tertiary-container">{ride?.hazardsDetectedCount ?? '—'}</span>
-                <span className="font-label-md text-secondary">Craters</span>
+                <span className="font-label-md text-secondary">hazards</span>
               </div>
-              <span className="font-body-sm text-[11px] text-emerald-700 font-medium mt-1">0 Impacts detected</span>
+              <span className="font-body-sm text-[11px] text-emerald-700 font-medium mt-1">Warned about or auto-detected</span>
             </div>
 
             {/* Card 4: Civic XP */}
@@ -255,7 +271,7 @@ export default function RideSummaryScreen() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary text-[20px]">map</span>
-                <span className="font-label-lg font-bold text-primary">Route Corridor & Potholes</span>
+                <span className="font-label-lg font-bold text-primary">Your route and nearby hazards</span>
               </div>
               <button
                 onClick={handleReplayRoute}
@@ -268,46 +284,27 @@ export default function RideSummaryScreen() {
               </button>
             </div>
 
-            {/* Map Preview Box */}
-            <div className="relative w-full h-44 rounded-2xl overflow-hidden bg-primary/20">
-              <img
-                alt="Route completed map preview"
-                className="w-full h-full object-cover"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuCkQn24Yq39Va8vQSjVnHMO6U-0SAdgVy5C_YcEPgB1h4et5NjM3jF7KoK5sTr7SdTqgkVT5nE3K5_etTIinj9tsqg7qi1PWPQuW_sP8FUe1lbAmJNm7ga3-0NiX7QjeTpQUKiYDx0uMcKQDUaePLjRMnZjLYEgfaRIQDcZ8vAAqJx2oUQxNuLOWQUcVBtk-8C8OLUWRMpAuwgAR-ifE0lf4VjBHIae9hn5BSPaQwtatX7TyG4ATNff"
+            {routePoints.length > 1 ? (
+              <HazardMap
+                center={routePoints[Math.floor(routePoints.length / 2)]}
+                user={shownRoute[shownRoute.length - 1]}
+                hazards={hazards}
+                paths={[{ points: routePoints, color: '#94a3b8', width: 4, dashed: true }, { points: shownRoute, color: '#dd9202', width: 5 }]}
+                className="h-56 rounded-2xl"
+                initialZoom={15}
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-primary/60 via-transparent to-transparent"></div>
-
-              {/* Vector line representing route taken */}
-              <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 320 176">
-                <path
-                  d="M 40 140 L 90 95 L 170 105 L 240 50 L 280 30"
-                  fill="none"
-                  stroke="#dd9202"
-                  strokeWidth="5"
-                  strokeLinecap="round"
-                  strokeDasharray="280"
-                  strokeDashoffset={280 - (280 * replayProgress) / 100}
-                />
-                {/* Pins */}
-                <circle cx="90" cy="95" r="5" fill="#ba1a1a" />
-                <circle cx="170" cy="105" r="5" fill="#ba1a1a" />
-                <circle cx="240" cy="50" r="5" fill="#ffb955" />
-                {/* Start & End Points */}
-                <circle cx="40" cy="140" r="6" fill="#1f3864" stroke="#ffffff" strokeWidth="2" />
-                <circle cx="280" cy="30" r="6" fill="#10b981" stroke="#ffffff" strokeWidth="2" />
-              </svg>
-
-              <div className="absolute bottom-2.5 left-3 right-3 flex items-center justify-between text-[11px] text-white">
-                <span className="font-semibold bg-black/50 px-2 py-0.5 rounded-md">Start: Koramangala</span>
-                <span className="font-semibold bg-emerald-900/80 px-2 py-0.5 rounded-md">Illustrative route only</span>
-              </div>
-            </div>
+            ) : (
+              <p className="rounded-2xl bg-surface-container p-4 text-sm text-secondary">
+                No GPS track was recorded for this ride. Allow location access during the next ride to see your route here.
+              </p>
+            )}
           </div>
 
           <section className="flex flex-col gap-space-sm">
             <h3 className="font-headline-sm text-headline-sm text-primary font-bold">Ride report summary</h3>
             <div className="rounded-2xl bg-surface-container-low p-4 text-sm text-secondary">
-              {ride?.hazardsReportedCount ?? 0} hazard reports were submitted during this ride. Automatic hazard detection is not connected.
+              {ride?.destination ? `Destination: ${ride.destination}. ` : ''}
+              Safety score {ride?.safetyScore ?? '—'}/100. You submitted {ride?.hazardsReportedCount ?? 0} reports and passed or auto-detected {ride?.hazardsDetectedCount ?? 0} hazards.
             </div>
           </section>
           {/* Primary CTA Buttons */}
@@ -332,7 +329,7 @@ export default function RideSummaryScreen() {
           {/* Footer note */}
           <div className="flex items-center justify-center gap-1.5 text-secondary text-center pt-1">
             <span className="material-symbols-outlined text-[16px] text-surface-tint">verified_user</span>
-            <span className="font-label-sm text-xs">BBMP Citizen Roads Initiative Verified</span>
+            <span className="font-label-sm text-xs">Your reports feed the city hazard dashboard</span>
           </div>
         </div>
       </main>

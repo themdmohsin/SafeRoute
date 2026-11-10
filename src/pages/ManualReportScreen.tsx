@@ -3,23 +3,45 @@ import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import Toast from '../components/Toast.tsx';
 import { apiRequest } from '../lib/api';
+import { getPosition, reverseGeocode } from '../lib/geo';
 
 export default function ManualReportScreen() {
   const navigate = useNavigate();
+  // Return to the ride if one is running, otherwise home.
+  const backTo = localStorage.getItem('saferoute_active_ride_id') ? '/ride/active' : '/home';
   const [hazardType, setHazardType] = useState('pothole');
   const [severity, setSeverity] = useState('');
   const [notes, setNotes] = useState('');
   const [hasPhoto, setHasPhoto] = useState(false);
   const [photoFileName, setPhotoFileName] = useState('');
+  const [photoData, setPhotoData] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [toastMessage, setToastMessage] = useState('');
   const [isToastOpen, setIsToastOpen] = useState(false);
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setPhotoFileName(e.target.files[0].name);
+  // Shrink to max 1024 px JPEG so the upload stays well under the server's 1 MB photo limit.
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setToastMessage('Choose an image file.');
+      setIsToastOpen(true);
+      return;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      setPhotoData(canvas.toDataURL('image/jpeg', 0.75));
+      setPhotoFileName(file.name);
       setHasPhoto(true);
+    } catch {
+      setToastMessage('Could not read that image. Try a JPEG or PNG.');
+      setIsToastOpen(true);
     }
   };
 
@@ -27,10 +49,8 @@ export default function ManualReportScreen() {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      if (!navigator.geolocation) throw new Error('This browser does not provide device location.');
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error('Allow location access to submit a report.')), { enableHighAccuracy: true, timeout: 10000 });
-      });
+      const position = await getPosition();
+      const place = await reverseGeocode({ lat: position.coords.latitude, lng: position.coords.longitude });
       const result = await apiRequest<{ hazard: { id: string }; classification?: { aiSuggested: boolean; severity: string } | null }>('/hazards', {
         method: 'POST',
         body: {
@@ -38,9 +58,8 @@ export default function ManualReportScreen() {
           ...(severity ? { severity } : {}),
           description: notes.trim() || `${hazardType.replace('_', ' ')} hazard reported by a commuter.`,
           location: { type: 'Point', coordinates: [position.coords.longitude, position.coords.latitude] },
-          roadName: 'Device location',
-          area: 'Bengaluru',
-          photoUrl: null,
+          ...place,
+          photoUrl: photoData,
           source: 'manual',
         },
       });
@@ -54,7 +73,7 @@ export default function ManualReportScreen() {
         : '';
       setToastMessage(`Hazard report saved.${classification}`);
       setIsToastOpen(true);
-      window.setTimeout(() => navigate('/ride/active'), 900);
+      window.setTimeout(() => navigate(backTo), 900);
     } catch (error) {
       setToastMessage(error instanceof Error ? error.message : 'Unable to submit hazard report.');
       setIsToastOpen(true);
@@ -66,7 +85,7 @@ export default function ManualReportScreen() {
   return (
     <div className="bg-background font-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-secondary-container">
       {/* Header title FIXED to "Manual Hazard Report" */}
-      <AppHeader title="Manual Hazard Report" variant="subpage" onBack={() => navigate('/ride/active')} />
+      <AppHeader title="Manual Hazard Report" variant="subpage" onBack={() => navigate(backTo)} />
 
       <main className="flex-1 flex flex-col relative w-full pt-16 pb-safe bg-surface max-w-lg mx-auto">
         <div className="flex flex-col w-full px-margin pb-space-xl gap-space-lg">
@@ -82,7 +101,7 @@ export default function ManualReportScreen() {
               Report Road Hazard
             </h2>
             <p className="font-body-sm text-body-sm text-secondary">
-              Reports are stored in SafeRoute. Municipal dispatch is not connected.
+              Reports go to the SafeRoute review queue, where admins verify them and mark them fixed.
             </p>
           </div>
 
@@ -354,7 +373,7 @@ export default function ManualReportScreen() {
                 <div className="flex flex-col items-center">
                   <p className="font-label-lg text-label-lg text-primary font-bold">Tap to snap or select photo</p>
                   <p className="font-body-sm text-body-sm text-secondary mt-0.5 max-w-[260px]">
-                    Photo selection stays in this browser; photo upload is not connected.
+                    The photo is shrunk and attached to your report so reviewers can see it.
                   </p>
                 </div>
 
@@ -413,7 +432,7 @@ export default function ManualReportScreen() {
 
               <button
                 className="w-full h-11 rounded-xl text-secondary hover:text-on-surface font-label-lg text-label-lg flex items-center justify-center transition-colors cursor-pointer"
-                onClick={() => navigate('/ride/active')}
+                onClick={() => navigate(backTo)}
                 type="button"
               >
                 Cancel and Return to Map

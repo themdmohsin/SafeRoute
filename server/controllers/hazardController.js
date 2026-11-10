@@ -6,6 +6,10 @@ const allowedTypes = ['pothole', 'waterlogging', 'open_manhole', 'speed_breaker'
 const allowedSeverities = ['low', 'medium', 'high'];
 const allowedStatuses = ['reported', 'verified', 'resolved'];
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Photos arrive as browser-compressed data URLs (or a plain https link); ~1.4 MB of base64 max.
+const validPhoto = (value) => value == null || value === ''
+  || (typeof value === 'string' && value.length <= 1_400_000
+    && (/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value) || /^https:\/\/\S+$/.test(value)));
 
 export async function createHazard(req, res) {
   const { hazardType, severity, description, photoUrl, location, roadName, area, source } = req.body || {};
@@ -18,6 +22,7 @@ export async function createHazard(req, res) {
   if (!location?.coordinates || location.coordinates.length !== 2) {
     return res.status(400).json({ message: 'Location must contain [longitude, latitude] coordinates.' });
   }
+  if (!validPhoto(photoUrl)) return res.status(400).json({ message: 'Photo must be a JPEG, PNG or WebP image under 1 MB.' });
   let classification = null;
   if (!severity) classification = await classifySeverity(description.trim());
   try {
@@ -48,6 +53,7 @@ export async function listHazards(req, res) {
   const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
   const filter = {};
+  if (req.query.mine === 'true') filter.reportedBy = req.user.id;
   if (hazardType) {
     if (!allowedTypes.includes(hazardType)) return res.status(400).json({ message: 'Invalid hazardType filter.' });
     filter.hazardType = hazardType;
@@ -84,7 +90,9 @@ export async function listHazards(req, res) {
   }
 
   const [hazards, total] = await Promise.all([
-    HazardReport.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('reportedBy', 'name'),
+    // Photos are large data URLs, so lists skip them unless asked (admin review asks).
+    HazardReport.find(filter).select(req.query.photos === 'true' ? {} : { photoUrl: 0 })
+      .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('reportedBy', 'name'),
     HazardReport.countDocuments(filter),
   ]);
   return res.json({ hazards, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
@@ -115,6 +123,7 @@ export async function updateHazard(req, res) {
     if (key === 'location' && (!req.body.location?.coordinates || req.body.location.coordinates.length !== 2)) {
       return res.status(400).json({ message: 'Location must contain [longitude, latitude] coordinates.' });
     }
+    if (key === 'photoUrl' && !validPhoto(req.body.photoUrl)) return res.status(400).json({ message: 'Photo must be a JPEG, PNG or WebP image under 1 MB.' });
     hazard[key] = req.body[key];
   }
   await hazard.save();

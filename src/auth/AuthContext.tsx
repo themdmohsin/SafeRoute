@@ -7,8 +7,20 @@ export interface AuthUser {
   email: string;
   role: 'commuter' | 'admin';
   vehicleType?: string;
+  vehicleNumber?: string;
+  homeArea?: string;
+  preferences?: UserPreferences;
   createdAt?: string;
 }
+
+export interface UserPreferences {
+  audibleAlerts: boolean;
+  autoDetect: boolean;
+  anonymousTelemetry: boolean;
+  nightMap: boolean;
+}
+
+export type ProfilePatch = Partial<Pick<AuthUser, 'name' | 'vehicleType' | 'vehicleNumber' | 'homeArea'>> & { preferences?: Partial<UserPreferences> };
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -16,6 +28,8 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
+  resetPassword: (token: string, password: string) => Promise<void>;
+  updateProfile: (patch: ProfilePatch) => Promise<void>;
   logout: () => void;
 }
 
@@ -71,6 +85,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading,
     login: (email, password) => authenticate('/auth/login', { email, password }),
     register: (name, email, password) => authenticate('/auth/register', { name, email, password }),
+    resetPassword: (resetToken, password) => authenticate('/auth/reset-password', { token: resetToken, password }),
+    updateProfile: async (patch) => {
+      const result = await apiRequest<{ user: AuthUser }>('/auth/me', { method: 'PATCH', body: patch });
+      setUser(result.user);
+    },
     logout: () => {
       localStorage.removeItem(TOKEN_KEY);
       setToken(null);

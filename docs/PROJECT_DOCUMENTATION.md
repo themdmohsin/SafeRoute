@@ -67,8 +67,13 @@ All paths start with `/api`. 🔒 = needs `Authorization: Bearer <token>`. 👑 
 | POST | `/auth/register` | Create account, returns token + user |
 | POST | `/auth/login` | Log in, returns token + user |
 | GET 🔒 | `/auth/me` | Current user |
+| PATCH 🔒 | `/auth/me` | Update name, vehicle, registration, home area, preferences |
+| GET 🔒 | `/auth/me/stats` | My report/ride counts, points, badges |
+| POST | `/auth/forgot-password` | Create a 30-minute reset link (printed to the server console in development) |
+| POST | `/auth/reset-password` | `{ token, password }`. Sets a new password and logs in |
+| GET / POST 🔒 | `/notifications`, `/notifications/read` | Updates on my reports + new high-severity hazards; mark all read |
 | POST 🔒 | `/hazards` | Create report. If severity is missing, Claude suggests one |
-| GET 🔒 | `/hazards` | List with filters: `hazardType`, `severity`, `status`, `area`, `startDate`, `endDate`, `page`, `limit` |
+| GET 🔒 | `/hazards` | List with filters: `hazardType`, `severity`, `status`, `area`, `startDate`, `endDate`, `page`, `limit`, `mine=true`, `photos=true` |
 | GET 🔒 | `/hazards/:id` | One report |
 | PATCH 🔒 | `/hazards/:id` | Update. Reporter or admin only |
 | DELETE 🔒 | `/hazards/:id` | Delete. Reporter or admin only |
@@ -168,7 +173,18 @@ node --test
 - `tests/requireAdmin.test.js`: admin guard, including the demoted-admin case (3 tests).
 - Type check for the frontend: `npm run lint`.
 
+## 13a. Maps, routing and live ride
+
+- Maps are drawn from OpenStreetMap tiles by `src/components/HazardMap.tsx`, with real hazard pins, drag, zoom, a layer toggle and recenter.
+- Place search and road names use OpenStreetMap Nominatim. Driving routes and alternatives come from the public OSRM server. Each route is scored by how many open hazards lie within 40 m of it.
+- Active Ride uses `watchPosition` for distance, speed and the track. It speaks a warning 200 m before a reported hazard. With auto-detect on, it sends 2-second motion-sensor windows to `/api/ml/hazard`.
+
+See [TESTING_GUIDE.md](TESTING_GUIDE.md) to test every screen and to make a user an admin.
+
 ## 14. Known limits / future work
+
+- Password-reset links are printed to the server console; there is no email service yet.
+- Nominatim and OSRM are free public services with rate limits, fine for a demo but not for heavy traffic.
 
 - The assistant finds areas from a fixed list of Bengaluru localities. Other place names are not filtered.
 - The JWT is stored in `localStorage`. An httpOnly cookie would be safer against XSS.

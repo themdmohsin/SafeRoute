@@ -13,6 +13,7 @@ interface AdminHazard {
   roadName?: string;
   status: 'reported' | 'verified' | 'resolved';
   source: string;
+  photoUrl?: string | null;
   createdAt: string;
   reportedBy?: { name: string } | null;
 }
@@ -37,7 +38,7 @@ export default function AdminScreen() {
   useEffect(() => {
     setError('');
     if (tab === 'reports') {
-      const params = new URLSearchParams({ limit: '50' });
+      const params = new URLSearchParams({ limit: '50', photos: 'true' });
       if (statusFilter) params.set('status', statusFilter);
       apiRequest<{ hazards: AdminHazard[] }>(`/hazards?${params}`).then((r) => setHazards(r.hazards)).catch(fail);
     } else if (tab === 'users') {
@@ -117,6 +118,7 @@ export default function AdminScreen() {
                   <span className="text-xs text-secondary">{h.hazardType.replaceAll('_', ' ')}, {h.severity} severity, {h.source}</span>
                 </div>
                 <p className="text-sm text-secondary">{h.description}</p>
+                {h.photoUrl && <img src={h.photoUrl} alt={`Photo of the reported ${h.hazardType.replaceAll('_', ' ')}`} className="max-h-48 w-fit rounded-xl object-cover" />}
                 <p className="text-xs text-secondary">
                   Reported by {h.reportedBy?.name || 'automatic detection'} on <time dateTime={h.createdAt}>{new Date(h.createdAt).toLocaleString()}</time>
                 </p>

@@ -23,8 +23,8 @@ const COLUMNS = [
   {
     heading: 'Contact',
     links: [
-      { label: 'Email us', href: 'mailto:hello@saferoute.app' },
-      { label: 'Report a bug', href: 'mailto:hello@saferoute.app?subject=SafeRoute%20bug%20report' },
+      { label: 'Contact us', href: '#contact' },
+      { label: 'Report a bug', href: '#contact' },
     ],
   },
 ];

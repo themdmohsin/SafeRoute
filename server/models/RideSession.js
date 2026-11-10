@@ -10,6 +10,7 @@ const rideSessionSchema = new mongoose.Schema(
     hazardsDetectedCount: { type: Number, min: 0, default: 0 },
     hazardsReportedCount: { type: Number, min: 0, default: 0 },
     safetyScore: { type: Number, min: 0, max: 100, default: 100 },
+    destination: { type: String, trim: true, maxlength: 200, default: '' },
     route: {
       type: [{ lat: { type: Number, required: true }, lng: { type: Number, required: true } }],
       default: undefined,

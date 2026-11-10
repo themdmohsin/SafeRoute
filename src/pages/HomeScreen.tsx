@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
@@ -6,6 +6,7 @@ import Toast from '../components/Toast.tsx';
 import AssistantChat from '../components/AssistantChat.tsx';
 import { apiRequest } from '../lib/api';
 import { useAuth } from '../auth/AuthContext';
+import { getPosition, reverseGeocode } from '../lib/geo';
 
 interface HomeHazard {
   _id: string;
@@ -21,6 +22,7 @@ export default function HomeScreen() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [activeFilter, setActiveFilter] = useState('All');
+  const [refresh, setRefresh] = useState(0);
   const [hazards, setHazards] = useState<HomeHazard[]>([]);
   const [hazardsError, setHazardsError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
@@ -73,11 +75,11 @@ export default function HomeScreen() {
     const params = new URLSearchParams({ limit: '5', page: '1' });
     if (activeFilter === 'Deep Potholes') params.set('hazardType', 'pothole');
     if (activeFilter === 'Waterlogging') params.set('hazardType', 'waterlogging');
-    if (activeFilter === 'Roadwork') params.set('hazardType', 'speed_breaker');
+    if (activeFilter === 'Speed Breakers') params.set('hazardType', 'speed_breaker');
     apiRequest<{ hazards: HomeHazard[] }>(`/hazards?${params.toString()}`)
       .then(({ hazards: recent }) => { setHazards(recent); setHazardsError(''); })
       .catch((error) => setHazardsError(error instanceof Error ? error.message : 'Could not load hazards.'));
-  }, [activeFilter]);
+  }, [activeFilter, refresh]);
 
   const showToast = (msg: string, icon = 'check_circle') => {
     setToastMessage(msg);
@@ -88,22 +90,21 @@ export default function HomeScreen() {
   const handleInstantReport = async (type: string) => {
     const hazardType = type === 'Waterlog' ? 'waterlogging' : type === 'Open Manhole' ? 'open_manhole' : 'pothole';
     try {
-      if (!navigator.geolocation) throw new Error('This browser does not provide device location.');
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error('Allow location access to submit a quick report.')), { enableHighAccuracy: true, timeout: 10000 });
-      });
+      const position = await getPosition();
+      const point = { lat: position.coords.latitude, lng: position.coords.longitude };
+      const place = await reverseGeocode(point);
       await apiRequest('/hazards', {
         method: 'POST',
         body: {
           hazardType,
           description: `Quick ${type} report from the current device location.`,
-          location: { type: 'Point', coordinates: [position.coords.longitude, position.coords.latitude] },
-          roadName: 'Device location',
-          area: 'Bengaluru',
+          location: { type: 'Point', coordinates: [point.lng, point.lat] },
+          ...place,
           source: 'manual',
         },
       });
-      showToast(`Instant ${type} report saved.`, 'pin_drop');
+      showToast(`${type} report saved${place.roadName ? ` on ${place.roadName}` : ''}.`, 'pin_drop');
+      setRefresh((n) => n + 1);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Could not save quick report.', 'error');
     }
@@ -123,13 +124,6 @@ export default function HomeScreen() {
                   Hi, {user?.name?.split(' ')[0] || 'Commuter'} 👋
                 </h1>
               </div>
-              <button
-                aria-label="Quick alerts"
-                onClick={() => showToast('Road notifications are not connected in this local build.', 'notifications')}
-                className="relative w-10 h-10 rounded-full bg-surface-container-low flex items-center justify-center text-primary active:scale-95 transition-transform cursor-pointer border border-outline-variant/10"
-              >
-                <span className="material-symbols-outlined text-[22px]">notifications</span>
-              </button>
             </div>
 
             {/* Active Street GPS Pill */}
@@ -151,7 +145,21 @@ export default function HomeScreen() {
                 </div>
               </div>
               <button
-                onClick={() => showToast(locationState === 'ready' ? `Live GPS active: ${locationText}.` : 'Location permission is required to use live tracking.', 'my_location')}
+                onClick={() => {
+                  setLocationText('Locating…');
+                  getPosition()
+                    .then((position) => {
+                      const text = `${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`;
+                      setLocationState('ready');
+                      setLocationText(text);
+                      showToast(`Location updated: ${text} (±${Math.round(position.coords.accuracy)} m).`, 'my_location');
+                    })
+                    .catch((error) => {
+                      setLocationState('permission-required');
+                      setLocationText('Location permission required');
+                      showToast(error.message, 'error');
+                    });
+                }}
                 className="text-surface-tint hover:text-primary transition-colors flex items-center shrink-0 p-1 cursor-pointer"
                 title="Recalibrate GPS"
               >
@@ -181,7 +189,7 @@ export default function HomeScreen() {
                   Safe Commute Mode
                 </h2>
                 <p className="font-body-sm text-body-sm text-on-primary-container leading-relaxed">
-                  Review recent community reports. Live vehicle detection and turn-by-turn guidance are not connected in this local build.
+                  Pick a destination, compare routes by how many reported hazards sit on them, and get spoken warnings as you ride.
                 </p>
               </div>
 
@@ -218,7 +226,7 @@ export default function HomeScreen() {
 
             {/* Filter Chips */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-margin px-margin no-scrollbar">
-              {['All', 'Deep Potholes', 'Waterlogging', 'Roadwork'].map((filter) => (
+              {['All', 'Deep Potholes', 'Waterlogging', 'Speed Breakers'].map((filter) => (
                 <button
                   key={filter}
                   onClick={() => setActiveFilter(filter)}

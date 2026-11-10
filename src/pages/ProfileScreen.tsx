@@ -1,17 +1,28 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppHeader from '../components/AppHeader.tsx';
 import BottomNav from '../components/BottomNav.tsx';
 import Toast from '../components/Toast.tsx';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth, type UserPreferences } from '../auth/AuthContext';
+import { apiRequest } from '../lib/api';
+
+interface Stats {
+  reports: number; confirmed: number; resolved: number; rides: number; km: number; points: number;
+  badges: Array<{ id: string; name: string; hint: string; earned: boolean }>;
+}
+interface ExportHazard { _id: string; createdAt: string; hazardType: string; severity: string; status: string; roadName?: string; area?: string; description: string; location: { coordinates: [number, number] } }
+
+const BADGE_ICON: Record<string, string> = { 'pothole-hunter': '🏆', 'night-sentinel': '🌙', 'rain-rider': '🌧️', 'verified-citizen': '🛡️' };
+const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
 export default function ProfileScreen() {
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
-  const [audibleAlerts, setAudibleAlerts] = useState(true);
-  const [autoDetect, setAutoDetect] = useState(true);
-  const [anonymousTelemetry, setAnonymousTelemetry] = useState(true);
-  const [darkMapMode, setDarkMapMode] = useState(false);
+  const { logout, user, updateProfile } = useAuth();
+  const prefs: UserPreferences = user?.preferences ?? { audibleAlerts: true, autoDetect: true, anonymousTelemetry: true, nightMap: false };
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState({ name: '', vehicleType: '', vehicleNumber: '', homeArea: '' });
+  const [isSaving, setIsSaving] = useState(false);
 
   const [toastMessage, setToastMessage] = useState('');
   const [isToastOpen, setIsToastOpen] = useState(false);
@@ -21,13 +32,61 @@ export default function ProfileScreen() {
     setIsToastOpen(true);
   };
 
+  useEffect(() => {
+    apiRequest<Stats>('/auth/me/stats').then(setStats).catch((e) => showToast(e instanceof Error ? e.message : 'Could not load your stats.'));
+  }, []);
+
   const handleLogout = () => {
     logout();
     navigate('/login', { replace: true });
   };
 
-  const handleExportData = () => {
-    showToast('Data export is not available yet.');
+  const togglePref = async (key: keyof UserPreferences) => {
+    try {
+      await updateProfile({ preferences: { [key]: !prefs[key] } });
+      showToast('Preference saved.');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not save preference.');
+    }
+  };
+
+  const openEditor = () => {
+    setForm({ name: user?.name || '', vehicleType: user?.vehicleType || '', vehicleNumber: user?.vehicleNumber || '', homeArea: user?.homeArea || '' });
+    setIsEditing(true);
+  };
+
+  const saveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) { showToast('Name cannot be empty.'); return; }
+    setIsSaving(true);
+    try {
+      await updateProfile(form);
+      setIsEditing(false);
+      showToast('Profile saved.');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Could not save profile.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleExportData = async () => {
+    try {
+      const { hazards } = await apiRequest<{ hazards: ExportHazard[] }>('/hazards?mine=true&limit=100');
+      if (!hazards.length) { showToast('You have not reported any hazards yet.'); return; }
+      const header = ['Reported at', 'Type', 'Severity', 'Status', 'Road', 'Area', 'Latitude', 'Longitude', 'Description'];
+      const rows = hazards.map((h) => [h.createdAt, h.hazardType, h.severity, h.status, h.roadName, h.area, h.location.coordinates[1], h.location.coordinates[0], h.description]);
+      const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `saferoute-reports-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast(`Downloaded ${hazards.length} reports.`);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Export failed.');
+    }
   };
 
   return (
@@ -67,7 +126,7 @@ export default function ProfileScreen() {
                     <span className="w-1.5 h-1.5 rounded-full bg-tertiary-fixed-dim"></span>
                     {user?.role || 'commuter'} account
                   </span>
-                  <span className="text-xs text-primary-fixed-dim">• Indiranagar</span>
+                  {user?.homeArea && <span className="text-xs text-primary-fixed-dim">• {user.homeArea}</span>}
                 </div>
               </div>
             </div>
@@ -75,16 +134,16 @@ export default function ProfileScreen() {
             {/* Profile Counter Matrix */}
             <div className="grid grid-cols-3 gap-2 mt-6 pt-4 border-t border-primary-fixed-dim/20 text-center">
               <div>
-                <span className="font-display text-xl font-bold text-on-primary">—</span>
-                <p className="text-[11px] text-primary-fixed mt-0.5">Reports not counted</p>
+                <span className="font-display text-xl font-bold text-on-primary">{stats?.reports ?? '—'}</span>
+                <p className="text-[11px] text-primary-fixed mt-0.5">Reports</p>
               </div>
               <div className="border-x border-primary-fixed-dim/20">
-                <span className="font-display text-xl font-bold text-tertiary-fixed-dim">—</span>
-                <p className="text-[11px] text-primary-fixed mt-0.5">Repairs not tracked</p>
+                <span className="font-display text-xl font-bold text-tertiary-fixed-dim">{stats?.resolved ?? '—'}</span>
+                <p className="text-[11px] text-primary-fixed mt-0.5">Fixed after your report</p>
               </div>
               <div>
-                <span className="font-display text-xl font-bold text-on-primary">—</span>
-                <p className="text-[11px] text-primary-fixed mt-0.5">Points not tracked</p>
+                <span className="font-display text-xl font-bold text-on-primary">{stats?.points ?? '—'}</span>
+                <p className="text-[11px] text-primary-fixed mt-0.5">Points · {stats ? `${stats.rides} rides, ${stats.km} km` : ''}</p>
               </div>
             </div>
           </div>
@@ -92,26 +151,21 @@ export default function ProfileScreen() {
           {/* Commuter Badges Row */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-                  <h3 className="font-headline-sm text-sm font-bold text-primary">Badge examples (not tracked)</h3>
-              <span className="text-xs text-secondary font-semibold">Not tracked</span>
+              <h3 className="font-headline-sm text-sm font-bold text-primary">Badges</h3>
+              <span className="text-xs text-secondary font-semibold">{stats ? `${stats.badges.filter((b) => b.earned).length} of ${stats.badges.length} earned` : ''}</span>
             </div>
             <div className="grid grid-cols-4 gap-2">
-              <div className="flex flex-col items-center p-2.5 rounded-2xl bg-surface-container-low text-center gap-1 border border-outline-variant/10">
-                <span className="text-2xl">🏆</span>
-                <span className="text-[10px] font-bold text-on-surface leading-tight">Pothole Hunter</span>
-              </div>
-              <div className="flex flex-col items-center p-2.5 rounded-2xl bg-surface-container-low text-center gap-1 border border-outline-variant/10">
-                <span className="text-2xl">🌙</span>
-                <span className="text-[10px] font-bold text-on-surface leading-tight">Night Sentinel</span>
-              </div>
-              <div className="flex flex-col items-center p-2.5 rounded-2xl bg-surface-container-low text-center gap-1 border border-outline-variant/10">
-                <span className="text-2xl">🌧️</span>
-                <span className="text-[10px] font-bold text-on-surface leading-tight">Rain Rider</span>
-              </div>
-              <div className="flex flex-col items-center p-2.5 rounded-2xl bg-surface-container-low text-center gap-1 border border-outline-variant/10">
-                <span className="text-2xl">🛡️</span>
-                <span className="text-[10px] font-bold text-on-surface leading-tight">Verified Citizen</span>
-              </div>
+              {(stats?.badges ?? []).map((badge) => (
+                <div
+                  key={badge.id}
+                  title={badge.earned ? 'Earned' : `How to earn: ${badge.hint}`}
+                  className={`flex flex-col items-center p-2.5 rounded-2xl bg-surface-container-low text-center gap-1 border border-outline-variant/10 ${badge.earned ? '' : 'opacity-40 grayscale'}`}
+                >
+                  <span className="text-2xl">{BADGE_ICON[badge.id]}</span>
+                  <span className="text-[10px] font-bold text-on-surface leading-tight">{badge.name}</span>
+                  {!badge.earned && <span className="text-[9px] text-secondary leading-tight">{badge.hint}</span>}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -123,11 +177,12 @@ export default function ProfileScreen() {
               </div>
               <div>
                 <p className="font-label-md font-bold text-on-surface">{user?.vehicleType || 'No vehicle type set'}</p>
-                <p className="font-body-sm text-xs text-secondary font-mono">KA-04-ME-4412 • Two-Wheeler Suspension</p>
+                <p className="font-body-sm text-xs text-secondary font-mono">{user?.vehicleNumber || 'No registration number'}</p>
               </div>
             </div>
             <button
-              onClick={() => showToast('Vehicle editing is not available yet.')}
+              aria-label="Edit profile and vehicle"
+              onClick={openEditor}
               className="text-primary hover:text-surface-tint p-1.5 rounded-lg active:bg-surface-container cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">edit</span>
@@ -136,19 +191,19 @@ export default function ProfileScreen() {
 
           {/* Settings & Telemetry Preferences */}
           <div className="bg-surface-container-low rounded-3xl p-4 shadow-sm flex flex-col gap-4 border border-outline-variant/10">
-            <h3 className="font-headline-sm text-sm font-bold text-primary">Preferences preview (not saved)</h3>
+            <h3 className="font-headline-sm text-sm font-bold text-primary">Preferences (saved to your account)</h3>
 
             <div className="flex flex-col gap-3">
               {/* Toggle 1: Audible Alerts */}
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-label-md text-sm font-semibold text-on-surface">Audible Crater Alerts</p>
-                  <p className="font-body-sm text-xs text-secondary">Voice warnings 300m before severe hazards</p>
+                  <p className="font-label-md text-sm font-semibold text-on-surface">Voice hazard alerts</p>
+                  <p className="font-body-sm text-xs text-secondary">Spoken warnings 200 m before reported hazards during a ride</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
-                    checked={audibleAlerts}
-                    onChange={(e) => setAudibleAlerts(e.target.checked)}
+                    checked={prefs.audibleAlerts}
+                    onChange={() => togglePref('audibleAlerts')}
                     className="sr-only peer"
                     type="checkbox"
                   />
@@ -159,13 +214,13 @@ export default function ProfileScreen() {
               {/* Toggle 2: Auto-detect bumps */}
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-label-md text-sm font-semibold text-on-surface">Auto-Detect Surface Bumps</p>
-                  <p className="font-body-sm text-xs text-secondary">Sensor gyros log vibration spikes while riding</p>
+                  <p className="font-label-md text-sm font-semibold text-on-surface">Auto-detect bumps and potholes</p>
+                  <p className="font-body-sm text-xs text-secondary">Default for the auto-detect switch when you start a ride</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
-                    checked={autoDetect}
-                    onChange={(e) => setAutoDetect(e.target.checked)}
+                    checked={prefs.autoDetect}
+                    onChange={() => togglePref('autoDetect')}
                     className="sr-only peer"
                     type="checkbox"
                   />
@@ -176,13 +231,13 @@ export default function ProfileScreen() {
               {/* Toggle 3: Anonymous Telemetry */}
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-label-md text-sm font-semibold text-on-surface">Anonymous Civic Telemetry</p>
-                  <p className="font-body-sm text-xs text-secondary">Contribute masked road coordinates to BBMP</p>
+                  <p className="font-label-md text-sm font-semibold text-on-surface">Save ride GPS tracks</p>
+                  <p className="font-body-sm text-xs text-secondary">Keep your route for replay. Off: only ride totals are saved</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
-                    checked={anonymousTelemetry}
-                    onChange={(e) => setAnonymousTelemetry(e.target.checked)}
+                    checked={prefs.anonymousTelemetry}
+                    onChange={() => togglePref('anonymousTelemetry')}
                     className="sr-only peer"
                     type="checkbox"
                   />
@@ -193,13 +248,13 @@ export default function ProfileScreen() {
               {/* Toggle 4: Dark Map Mode */}
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-label-md text-sm font-semibold text-on-surface">Night Navigation Theme</p>
-                  <p className="font-body-sm text-xs text-secondary">High contrast display for nighttime commutes</p>
+                  <p className="font-label-md text-sm font-semibold text-on-surface">Night map theme</p>
+                  <p className="font-body-sm text-xs text-secondary">Darker map tiles for riding after dark</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
-                    checked={darkMapMode}
-                    onChange={(e) => setDarkMapMode(e.target.checked)}
+                    checked={prefs.nightMap}
+                    onChange={() => togglePref('nightMap')}
                     className="sr-only peer"
                     type="checkbox"
                   />
@@ -242,6 +297,35 @@ export default function ProfileScreen() {
           </div>
         </div>
       </main>
+
+      {isEditing && (
+        <div className="fixed inset-0 z-[60] bg-primary/60 flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="edit-profile-title">
+          <form onSubmit={saveProfile} className="w-full max-w-md rounded-3xl bg-surface-container-lowest p-5 flex flex-col gap-3">
+            <h2 id="edit-profile-title" className="text-lg font-bold text-primary">Edit profile</h2>
+            {([
+              ['name', 'Name', 'Your name'],
+              ['vehicleType', 'Vehicle', 'e.g. Scooter, Car, Bicycle'],
+              ['vehicleNumber', 'Registration number', 'e.g. KA-01-AB-1234'],
+              ['homeArea', 'Home area', 'e.g. Indiranagar'],
+            ] as const).map(([key, label, placeholder]) => (
+              <label key={key} className="text-xs font-semibold text-secondary flex flex-col gap-1">
+                {label}
+                <input
+                  value={form[key]}
+                  placeholder={placeholder}
+                  maxLength={key === 'vehicleNumber' ? 20 : 120}
+                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                  className="h-11 rounded-xl bg-surface-container-low px-3 text-sm text-on-surface focus:outline-2 focus:outline-primary"
+                />
+              </label>
+            ))}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button type="button" onClick={() => setIsEditing(false)} className="h-11 rounded-xl bg-surface-container-high font-semibold cursor-pointer">Cancel</button>
+              <button type="submit" disabled={isSaving} className="h-11 rounded-xl bg-primary text-on-primary font-bold cursor-pointer disabled:opacity-60">{isSaving ? 'Saving…' : 'Save changes'}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <BottomNav />
       <Toast message={toastMessage} icon="check_circle" isOpen={isToastOpen} onClose={() => setIsToastOpen(false)} />

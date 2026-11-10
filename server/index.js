@@ -13,6 +13,7 @@ import assistantRoutes from './routes/assistantRoutes.js';
 import mlRoutes from './routes/mlRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 5000;
@@ -30,7 +31,8 @@ app.use(cors({
     return callback(new Error('Origin is not allowed by CORS.'));
   },
 }));
-app.use(express.json());
+// Raised from 100kb so hazard photos (compressed in the browser) fit.
+app.use(express.json({ limit: '2mb' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/hazards', hazardRoutes);
@@ -40,6 +42,7 @@ app.use('/api/assistant', assistantRoutes);
 app.use('/api/ml', mlRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({

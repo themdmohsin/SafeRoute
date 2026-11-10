@@ -1,8 +1,15 @@
 import mongoose from 'mongoose';
 import RideSession from '../models/RideSession.js';
 
+const MAX_ROUTE_POINTS = 5000;
+const validRoute = (route) => route === undefined || (Array.isArray(route) && route.length <= MAX_ROUTE_POINTS
+  && route.every((p) => Number.isFinite(p?.lat) && Number.isFinite(p?.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180));
+
 export async function startRide(req, res) {
-  const ride = await RideSession.create({ user: req.user.id, startTime: new Date(), route: req.body?.route });
+  const { route, destination } = req.body || {};
+  if (!validRoute(route)) return res.status(400).json({ message: 'route must be a list of { lat, lng } points.' });
+  if (destination !== undefined && typeof destination !== 'string') return res.status(400).json({ message: 'destination must be text.' });
+  const ride = await RideSession.create({ user: req.user.id, startTime: new Date(), route, destination: destination?.slice(0, 200) });
   return res.status(201).json({ ride, id: ride.id });
 }
 
@@ -23,6 +30,7 @@ export async function updateRide(req, res) {
   const ride = await RideSession.findOne({ _id: req.params.id, user: req.user.id });
   if (!ride) return res.status(404).json({ message: 'Ride not found.' });
   if (ride.endTime) return res.status(409).json({ message: 'This ride has already ended.' });
+  if (!validRoute(req.body?.route)) return res.status(400).json({ message: 'route must be a list of { lat, lng } points.' });
 
   const fields = ['distanceKm', 'durationMinutes', 'hazardsDetectedCount', 'hazardsReportedCount', 'safetyScore', 'route'];
   for (const field of fields) {
@@ -35,6 +43,11 @@ export async function updateRide(req, res) {
   if (!('durationMinutes' in (req.body || {}))) {
     ride.durationMinutes = Math.max(0, Math.round((ride.endTime - ride.startTime) / 60000));
   }
-  await ride.save();
+  try {
+    await ride.save();
+  } catch (error) {
+    if (error.name === 'ValidationError') return res.status(400).json({ message: error.message });
+    throw error;
+  }
   return res.json({ ride });
 }

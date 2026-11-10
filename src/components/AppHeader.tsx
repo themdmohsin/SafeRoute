@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import NotificationBell from './NotificationBell.tsx';
 
 const LOGO_URL = '/safe-route-logo.svg';
 
@@ -72,15 +73,7 @@ export default function AppHeader({
 
         <div className="flex items-center gap-space-sm shrink-0">
           {variant === 'main' && (
-            <button
-              aria-label="Alerts and notifications"
-              className="w-11 h-11 flex items-center justify-center rounded-full bg-surface-container-low text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
-              onClick={() => {
-                alert('Civic Safety Alert: BBMP road repair active in Indiranagar Ward 112.');
-              }}
-            >
-              <span className="material-symbols-outlined text-[22px]">notifications_active</span>
-            </button>
+            <NotificationBell />
           )}
           <button
             aria-label="Profile"
