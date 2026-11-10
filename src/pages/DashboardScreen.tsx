@@ -10,6 +10,42 @@ interface AnalyticsData {
   hazardsByDay: Array<{ date: string; count: number }>;
   topHazardZones: Array<{ zone: string; area: string; roadName: string; count: number }>;
   severityBreakdown: Array<{ severity: string; count: number }>;
+  typeBreakdown: Array<{ key: string; count: number }>;
+  statusBreakdown: Array<{ key: string; count: number }>;
+  sourceBreakdown: Array<{ key: string; count: number }>;
+}
+
+const pretty = (key: string) => key.replaceAll('_', ' ').replace('-', ' ').replace(/^\w/, (c) => c.toUpperCase());
+const SEVERITY_COLOR: Record<string, string> = { low: 'bg-emerald-600', medium: 'bg-amber-500', high: 'bg-error' };
+
+// Horizontal bars; widths are relative to the largest row so small counts stay visible.
+function BarList({ rows, color }: { rows: Array<{ key: string; count: number }>; color: string }) {
+  const max = Math.max(1, ...rows.map((row) => row.count));
+  return (
+    <ul className="flex flex-col gap-2">
+      {rows.map((row) => (
+        <li key={row.key} className="grid grid-cols-[7.5rem_1fr_2rem] items-center gap-2 text-xs">
+          <span className="truncate font-semibold text-on-surface">{pretty(row.key)}</span>
+          <span className="h-3 rounded-full bg-surface-container-high overflow-hidden">
+            <span className={`block h-full rounded-full ${color}`} style={{ width: `${(row.count / max) * 100}%` }} />
+          </span>
+          <span className="text-right font-bold text-on-surface">{row.count}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ChartCard({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
+  return (
+    <section className="bg-surface-container-low rounded-3xl p-4 shadow-sm flex flex-col gap-3 border border-outline-variant/10">
+      <div>
+        <h3 className="font-headline-sm text-sm font-bold text-primary">{title}</h3>
+        <p className="font-body-sm text-xs text-secondary">{note}</p>
+      </div>
+      {children}
+    </section>
+  );
 }
 
 interface HazardFeedItem {
@@ -65,6 +101,9 @@ export default function DashboardScreen() {
   const highCount = summary?.severityBreakdown.find((item) => item.severity === 'high')?.count || 0;
   const chartRows = summary?.hazardsByDay.slice(-7) || [];
   const chartMax = Math.max(1, ...chartRows.map((item) => item.count));
+  const total = summary?.totalHazards || 0;
+  const statusCount = (key: string) => summary?.statusBreakdown.find((item) => item.key === key)?.count || 0;
+  const resolvedPct = total ? Math.round((statusCount('resolved') / total) * 100) : 0;
 
   return (
     <div className="bg-background font-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-secondary-container">
@@ -120,14 +159,14 @@ export default function DashboardScreen() {
 
             <div className="relative z-10 flex items-center justify-between">
               <div className="flex flex-col gap-1">
-                <span className="font-label-md text-xs text-primary-fixed uppercase tracking-wider font-semibold">
-                  Citywide Safety Index
+                <span className="font-label-md text-xs text-primary-fixed font-semibold">
+                  Resolution rate
                 </span>
                 <div className="flex items-baseline gap-2">
-                  <span className="font-display text-2xl font-extrabold text-on-primary">Not calculated</span>
+                  <span className="font-display text-2xl font-extrabold text-on-primary">{summary ? `${resolvedPct}%` : '—'}</span>
                 </div>
                 <p className="font-body-sm text-xs text-on-primary-container mt-1">
-                  The API reports hazards, but does not calculate a citywide safety score or ward ranking.
+                  {statusCount('resolved')} of {total} filtered reports are fixed.
                 </p>
               </div>
 
@@ -145,12 +184,12 @@ export default function DashboardScreen() {
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                     fill="none"
                     stroke="currentColor"
-                    strokeDasharray="0, 100"
+                    strokeDasharray={`${resolvedPct}, 100`}
                     strokeLinecap="round"
                     strokeWidth="3.5"
                   />
                 </svg>
-                <span className="absolute font-display text-xs font-bold text-on-primary">N/A</span>
+                <span className="absolute font-display text-xs font-bold text-on-primary">{resolvedPct}%</span>
               </div>
             </div>
           </div>
@@ -226,6 +265,49 @@ export default function DashboardScreen() {
             </div>
             <p className="border-t border-outline-variant/10 pt-2 text-center text-xs text-secondary">Each bar shows reports created on that date.</p>
           </div>
+
+          {summary && (
+            <>
+              <ChartCard title="Severity mix" note="Share of filtered reports at each severity level">
+                <div className="flex h-4 w-full overflow-hidden rounded-full bg-surface-container-high" role="img" aria-label={summary.severityBreakdown.map((s) => `${s.severity}: ${s.count}`).join(', ')}>
+                  {summary.severityBreakdown.map((s) => total > 0 && (
+                    <span key={s.severity} className={SEVERITY_COLOR[s.severity]} style={{ width: `${(s.count / total) * 100}%` }} />
+                  ))}
+                </div>
+                <ul className="flex justify-between text-xs">
+                  {summary.severityBreakdown.map((s) => (
+                    <li key={s.severity} className="flex items-center gap-1.5">
+                      <span className={`h-2.5 w-2.5 rounded-full ${SEVERITY_COLOR[s.severity]}`} />
+                      <span className="text-secondary">{pretty(s.severity)}</span>
+                      <span className="font-bold text-on-surface">{total ? Math.round((s.count / total) * 100) : 0}%</span>
+                    </li>
+                  ))}
+                </ul>
+              </ChartCard>
+
+              <ChartCard title="Reports by hazard type" note="Which road problems riders hit most">
+                <BarList rows={summary.typeBreakdown} color="bg-primary/80" />
+              </ChartCard>
+
+              <ChartCard title="Repair pipeline" note="Where filtered reports sit, from first report to fixed">
+                <ol className="grid grid-cols-3 gap-2">
+                  {summary.statusBreakdown.map((s) => (
+                    <li key={s.key} className="rounded-2xl bg-surface-container-lowest p-3 text-center">
+                      <span className="block font-display text-xl font-bold text-on-surface">{s.count}</span>
+                      <span className="text-xs text-secondary">{pretty(s.key)}</span>
+                      <span className="mt-2 block h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+                        <span className="block h-full bg-tertiary-fixed-dim" style={{ width: `${total ? (s.count / total) * 100 : 0}%` }} />
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </ChartCard>
+
+              <ChartCard title="How hazards were found" note="Manual reports versus sensor and ML detection">
+                <BarList rows={summary.sourceBreakdown} color="bg-secondary" />
+              </ChartCard>
+            </>
+          )}
 
           {/* Recent reports are loaded from the API using the current dashboard filters. */}
           <div className="flex flex-col gap-space-sm">

@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
 
 export function protect(req, res, next) {
   const authorization = req.get('Authorization') || '';
@@ -16,9 +17,15 @@ export function protect(req, res, next) {
   }
 }
 
-export function requireAdmin(req, res, next) {
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ message: 'Administrator access required.' });
+// Reads the role from the database so a demotion applies before the 7-day token expires.
+export async function requireAdmin(req, res, next) {
+  try {
+    const user = await User.findById(req.user?.id).select('role');
+    if (user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Administrator access required.' });
+    }
+    return next();
+  } catch (error) {
+    return next(error);
   }
-  return next();
 }

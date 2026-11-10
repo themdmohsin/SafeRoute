@@ -17,6 +17,7 @@ import ActiveRideScreen from './pages/ActiveRideScreen.tsx';
 import ManualReportScreen from './pages/ManualReportScreen.tsx';
 import RideSummaryScreen from './pages/RideSummaryScreen.tsx';
 import DashboardScreen from './pages/DashboardScreen.tsx';
+import AdminScreen from './pages/AdminScreen.tsx';
 import { AuthProvider } from './auth/AuthContext';
 import RequireAuth from './auth/RequireAuth';
 
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/report" element={privatePage(<ManualReportScreen />)} />
         <Route path="/ride/summary" element={privatePage(<RideSummaryScreen />)} />
         <Route path="/dashboard" element={privatePage(<DashboardScreen />)} />
+        <Route path="/admin" element={<RequireAuth adminOnly><AdminScreen /></RequireAuth>} />
         {/* Fallback route */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

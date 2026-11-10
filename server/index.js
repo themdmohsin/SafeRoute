@@ -12,6 +12,7 @@ import analyticsRoutes from './routes/analyticsRoutes.js';
 import assistantRoutes from './routes/assistantRoutes.js';
 import mlRoutes from './routes/mlRoutes.js';
 import contactRoutes from './routes/contactRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 5000;
@@ -38,6 +39,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/ml', mlRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({

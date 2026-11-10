@@ -43,7 +43,13 @@ export async function getAnalyticsSummary(req, res) {
   const { filter, error } = buildHazardFilter(req.query);
   if (error) return res.status(400).json({ message: error });
 
-  const [totalResult, byDay, zones, severityRows] = await Promise.all([
+  const countBy = (field) => HazardReport.aggregate([{ $match: filter }, { $group: { _id: `$${field}`, count: { $sum: 1 } } }]);
+  const withZeros = (rows, keys) => {
+    const counts = Object.fromEntries(rows.map(({ _id, count }) => [_id, count]));
+    return keys.map((key) => ({ key, count: counts[key] || 0 }));
+  };
+
+  const [totalResult, byDay, zones, severityRows, typeRows, statusRows, sourceRows] = await Promise.all([
     HazardReport.aggregate([{ $match: filter }, { $count: 'total' }]),
     HazardReport.aggregate([
       { $match: filter },
@@ -80,6 +86,9 @@ export async function getAnalyticsSummary(req, res) {
       { $match: filter },
       { $group: { _id: '$severity', count: { $sum: 1 } } },
     ]),
+    countBy('hazardType'),
+    countBy('status'),
+    countBy('source'),
   ]);
 
   const severityCounts = Object.fromEntries(severityRows.map(({ _id, count }) => [_id, count]));
@@ -89,6 +98,9 @@ export async function getAnalyticsSummary(req, res) {
     hazardsByDay: byDay.map(({ _id, count }) => ({ date: _id, count })),
     topHazardZones: zones,
     severityBreakdown,
+    typeBreakdown: withZeros(typeRows, allowedTypes),
+    statusBreakdown: withZeros(statusRows, ['reported', 'verified', 'resolved']),
+    sourceBreakdown: withZeros(sourceRows, ['manual', 'sensor-detected', 'ml']),
     filters: {
       hazardType: req.query.hazardType || null,
       severity: req.query.severity || null,

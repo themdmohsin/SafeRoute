@@ -211,6 +211,15 @@ export default function ProfileScreen() {
 
           {/* Account & Export Actions */}
           <div className="flex flex-col gap-2">
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="w-full h-12 rounded-2xl bg-primary text-on-primary font-label-md font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">admin_panel_settings</span>
+                <span>Open admin console</span>
+              </button>
+            )}
             <button
               onClick={handleExportData}
               className="w-full h-12 rounded-2xl bg-surface-container-low hover:bg-surface-container text-primary font-label-md font-semibold flex items-center justify-center gap-2 border border-outline-variant/10 transition-colors cursor-pointer"

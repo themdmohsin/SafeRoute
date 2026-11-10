@@ -101,7 +101,8 @@ export async function updateHazard(req, res) {
   if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid hazard id.' });
   const hazard = await HazardReport.findById(req.params.id);
   if (!hazard) return res.status(404).json({ message: 'Hazard report not found.' });
-  if (req.user.role !== 'admin' && hazard.reportedBy.toString() !== req.user.id) {
+  // reportedBy is null for ML-created reports, so only admins can edit those.
+  if (req.user.role !== 'admin' && hazard.reportedBy?.toString() !== req.user.id) {
     return res.status(403).json({ message: 'Only the reporter or an admin can update this report.' });
   }
 
@@ -124,7 +125,7 @@ export async function deleteHazard(req, res) {
   if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: 'Invalid hazard id.' });
   const hazard = await HazardReport.findById(req.params.id);
   if (!hazard) return res.status(404).json({ message: 'Hazard report not found.' });
-  if (req.user.role !== 'admin' && hazard.reportedBy.toString() !== req.user.id) {
+  if (req.user.role !== 'admin' && hazard.reportedBy?.toString() !== req.user.id) {
     return res.status(403).json({ message: 'Only the reporter or an admin can delete this report.' });
   }
   await hazard.deleteOne();
