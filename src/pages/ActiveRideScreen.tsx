@@ -62,6 +62,20 @@ export default function ActiveRideScreen() {
     return () => window.clearInterval(timer);
   }, [rideId]);
 
+  // Keep the screen on during a ride; a sleeping screen pauses GPS and motion sensors.
+  // The browser drops the lock when the tab is hidden, so take it again on return.
+  useEffect(() => {
+    if (!rideId || !('wakeLock' in navigator)) return undefined;
+    let lock: WakeLockSentinel | null = null;
+    const acquire = () => {
+      if (document.visibilityState !== 'visible') return;
+      navigator.wakeLock.request('screen').then((l) => { lock = l; }).catch(() => undefined);
+    };
+    acquire();
+    document.addEventListener('visibilitychange', acquire);
+    return () => { document.removeEventListener('visibilitychange', acquire); lock?.release().catch(() => undefined); };
+  }, [rideId]);
+
   // Live GPS: position, speed, recorded track, current road name.
   useEffect(() => {
     if (!rideId) return undefined;
