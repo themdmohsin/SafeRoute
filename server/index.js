@@ -34,6 +34,15 @@ app.use(cors({
 // Raised from 100kb so hazard photos (compressed in the browser) fit.
 app.use(express.json({ limit: '2mb' }));
 
+// Serverless: connect once per warm instance, reuse after.
+let dbReady = null;
+if (process.env.VERCEL) {
+  app.use((req, res, next) => {
+    dbReady ??= connectDatabase().catch((error) => { dbReady = null; throw error; });
+    dbReady.then(() => next(), next);
+  });
+}
+
 app.use('/api/auth', authRoutes);
 app.use('/api/hazards', hazardRoutes);
 app.use('/api/rides', rideRoutes);
@@ -64,7 +73,12 @@ async function startServer() {
   });
 }
 
-startServer().catch((error) => {
-  console.error('SafeRoute API startup failed:', error.message);
-  process.exit(1);
-});
+// On Vercel the app runs as a serverless function (api/index.js); locally it listens.
+if (!process.env.VERCEL) {
+  startServer().catch((error) => {
+    console.error('SafeRoute API startup failed:', error.message);
+    process.exit(1);
+  });
+}
+
+export default app;
