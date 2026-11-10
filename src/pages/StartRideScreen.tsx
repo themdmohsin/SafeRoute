@@ -309,7 +309,7 @@ export default function StartRideScreen() {
                         </span>
                       </div>
                       <span className="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
-                        14.8 km â€¢ 32 min â€¢ 2 minor surface bumps
+                        14.8 km • 32 min • 2 minor surface bumps
                       </span>
                     </div>
                   </div>
@@ -341,7 +341,7 @@ export default function StartRideScreen() {
                         </span>
                       </div>
                       <span className="font-body-sm text-body-sm text-error mt-0.5 font-medium">
-                        12.2 km â€¢ 28 min â€¢ 8 severe craters logged
+                        12.2 km • 28 min • 8 severe craters logged
                       </span>
                     </div>
                   </div>

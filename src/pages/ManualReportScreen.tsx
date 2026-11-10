@@ -97,7 +97,7 @@ export default function ManualReportScreen() {
               </div>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-container-highest text-primary font-label-sm text-label-sm font-semibold">
                 <span className="material-symbols-outlined text-[14px]">lock</span>
-                <span>Accurate (Ãƒâ€šÃ‚Â±2m)</span>
+                <span>Accurate (±2m)</span>
               </span>
             </div>
             <div className="flex items-start gap-space-sm">
@@ -133,10 +133,10 @@ export default function ManualReportScreen() {
               {/* Hazard Pill Selector */}
               <div className="grid grid-cols-2 gap-space-sm">
                 {[
-                  { id: 'pothole', icon: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Â¢Ã‚Â³ÃƒÂ¯Ã‚Â¸Ã‚Â', title: 'Pothole', sub: 'Tarmac crater' },
-                  { id: 'waterlogging', icon: 'ÃƒÂ°Ã…Â¸Ã…â€™Ã…Â ', title: 'Waterlogging', sub: 'Flash puddle / flood' },
-                  { id: 'open_manhole', icon: 'ÃƒÂ¢Ã…Â¡Ã¢â€žÂ¢ÃƒÂ¯Ã‚Â¸Ã‚Â', title: 'Open Manhole', sub: 'Missing drain lid' },
-                  { id: 'speed_breaker', icon: 'ÃƒÂ°Ã…Â¸Ã…Â¡Ã‚Â§', title: 'Speed Bump', sub: 'Unmarked hump' },
+                  { id: 'pothole', icon: '🕳️', title: 'Pothole', sub: 'Tarmac crater' },
+                  { id: 'waterlogging', icon: '💧', title: 'Waterlogging', sub: 'Flash puddle / flood' },
+                  { id: 'open_manhole', icon: '🚧', title: 'Open Manhole', sub: 'Missing drain lid' },
+                  { id: 'speed_breaker', icon: '🛑', title: 'Speed Bump', sub: 'Unmarked hump' },
                 ].map((item) => {
                   const isChecked = hazardType === item.id;
                   return (
@@ -190,7 +190,7 @@ export default function ManualReportScreen() {
                         : 'bg-surface-container text-on-surface border-transparent hover:bg-surface-container-high'
                     }`}
                   >
-                    <span className="text-xl shrink-0">ÃƒÂ¢Ã…Â¡Ã‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â</span>
+                    <span className="text-xl shrink-0">⚠️</span>
                     <div className="min-w-0">
                       <p className="font-label-lg text-label-lg leading-tight font-semibold">
                         Road Cave-in / Other Hazard

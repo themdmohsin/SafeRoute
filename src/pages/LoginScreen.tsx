@@ -4,8 +4,7 @@ import AppHeader from '../components/AppHeader.tsx';
 import Toast from '../components/Toast.tsx';
 import { useAuth } from '../auth/AuthContext';
 
-const LOGO_URL =
-  'https://lh3.googleusercontent.com/aida/AEtjO1V3VxtXLXZ-OxUo3gXxROVH0esZPHsa8waby3mZRV_KH4FdKX9FTkgN5s9TeZijNrI0FM7vQpgZzC2P7KXLwFsidJ6HPzM5C6mBZH6W5K-MDnTcH0pDViUCt9nJw9_-3Fh9tcrUJceZ0LvBZ2mTdiPdF87b0vex19uYyMdpCanjjWygeGurlteazL-Xnkt1TDVbtXVTAinw2J7safTglr5Qfj6Bikd2n43Okj2vQuarDiqvKBb-fTL5j3A';
+const LOGO_URL = '/safe-route-logo.svg';
 
 export default function LoginScreen() {
   const navigate = useNavigate();

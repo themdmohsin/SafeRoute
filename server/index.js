@@ -11,11 +11,18 @@ import rideRoutes from './routes/rideRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
 import assistantRoutes from './routes/assistantRoutes.js';
 import mlRoutes from './routes/mlRoutes.js';
+import contactRoutes from './routes/contactRoutes.js';
 
 const app = express();
 const port = Number(process.env.PORT) || 5000;
 
-const allowedOrigins = (process.env.CLIENT_ORIGIN || '').split(',').map((origin) => origin.trim()).filter(Boolean);
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://safe-route-seven-beryl.vercel.app',
+  ...((process.env.CLIENT_ORIGIN || '').split(',').map((origin) => origin.trim()).filter(Boolean)),
+].filter((origin, index, array) => origin && array.indexOf(origin) === index);
+
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
@@ -30,6 +37,7 @@ app.use('/api/rides', rideRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/ml', mlRoutes);
+app.use('/api/contact', contactRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({

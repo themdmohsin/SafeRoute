@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { motion } from "framer-motion";
+import { apiRequest } from "../lib/api";
 
 function Field({ label, type = "text", name, value, onChange, textarea }) {
   const [focused, setFocused] = useState(false);
@@ -17,13 +18,13 @@ function Field({ label, type = "text", name, value, onChange, textarea }) {
         onChange={onChange}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        rows={textarea ? 4 : undefined}
-        className={`w-full bg-white/60 backdrop-blur-md border rounded-2xl px-4 pt-6 pb-2 text-[#03224d] outline-none transition-colors resize-none
+        rows={textarea ? 5 : undefined}
+        className={`w-full bg-white/60 backdrop-blur-md border rounded-2xl px-4 pt-7 pb-3 text-[#03224d] outline-none transition-colors resize-none ${textarea ? "min-h-[150px]" : "h-14"}
           ${focused ? "border-[#1f3864]" : "border-white/70"}`}
       />
       <motion.label
         animate={{
-          top: focused || filled ? 8 : textarea ? 18 : 14,
+          top: focused || filled ? 10 : textarea ? 20 : 15,
           fontSize: focused || filled ? 11 : 15,
           color: focused ? "#1f3864" : "#545f72",
         }}
@@ -39,13 +40,41 @@ function Field({ label, type = "text", name, value, onChange, textarea }) {
 export default function ContactSection() {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleChange = (e) =>
+  const handleChange = (e) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
+    if (error) setError("");
+  };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setSent(true);
+    setError("");
+
+    const name = form.name.trim();
+    const email = form.email.trim();
+    const message = form.message.trim();
+
+    if (!name || !email || !message) {
+      setError("Please complete all fields before sending your message.");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await apiRequest("/contact", {
+        method: "POST",
+        body: { name, email, message },
+      });
+      setSent(true);
+      setForm({ name: "", email: "", message: "" });
+    } catch (submissionError) {
+      setSent(false);
+      setError(submissionError instanceof Error ? submissionError.message : "Unable to send your message right now.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -87,12 +116,19 @@ export default function ContactSection() {
           <Field label="Email" type="email" name="email" value={form.email} onChange={handleChange} />
           <Field label="Message" name="message" value={form.message} onChange={handleChange} textarea />
 
+          {error && (
+            <div className="rounded-2xl border border-red-400/60 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+              {error}
+            </div>
+          )}
+
           <motion.button
             type="submit"
             whileTap={{ scale: 0.97 }}
-            className="w-full h-13 py-3.5 rounded-2xl bg-gradient-to-r from-[#ffb955] to-[#dd9202] text-[#1a202c] font-semibold transition-shadow shadow-lg shadow-black/20 hover:shadow-xl"
+            disabled={isSubmitting}
+            className="w-full h-13 py-3.5 rounded-2xl bg-gradient-to-r from-[#ffb955] to-[#dd9202] text-[#1a202c] font-semibold transition-shadow shadow-lg shadow-black/20 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-75"
           >
-            {sent ? "Message sent" : "Send message"}
+            {isSubmitting ? "Sending..." : sent ? "Message sent" : "Send message"}
           </motion.button>
         </motion.form>
       </div>

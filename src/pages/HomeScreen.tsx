@@ -26,6 +26,48 @@ export default function HomeScreen() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastIcon, setToastIcon] = useState('check_circle');
   const [isToastOpen, setIsToastOpen] = useState(false);
+  const [locationState, setLocationState] = useState<'ready' | 'permission-required' | 'unsupported'>('permission-required');
+  const [locationText, setLocationText] = useState('Location permission required');
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationState('unsupported');
+      setLocationText('Geolocation not available in this browser');
+      return;
+    }
+
+    const requestLocation = () => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const latitude = position.coords.latitude.toFixed(4);
+          const longitude = position.coords.longitude.toFixed(4);
+          setLocationState('ready');
+          setLocationText(`${latitude}, ${longitude}`);
+        },
+        () => {
+          setLocationState('permission-required');
+          setLocationText('Location permission required');
+        },
+        { enableHighAccuracy: true, timeout: 10000 },
+      );
+    };
+
+    if (navigator.permissions && 'query' in navigator.permissions) {
+      navigator.permissions.query({ name: 'geolocation' })
+        .then((permission) => {
+          if (permission.state === 'granted') {
+            requestLocation();
+          } else {
+            setLocationState('permission-required');
+            setLocationText('Location permission required');
+          }
+        })
+        .catch(() => requestLocation());
+      return;
+    }
+
+    requestLocation();
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams({ limit: '5', page: '1' });
@@ -54,7 +96,7 @@ export default function HomeScreen() {
         method: 'POST',
         body: {
           hazardType,
-          description: `Quick ${type} report near 12th Main junction.`,
+          description: `Quick ${type} report from the current device location.`,
           location: { type: 'Point', coordinates: [position.coords.longitude, position.coords.latitude] },
           roadName: 'Device location',
           area: 'Bengaluru',
@@ -78,12 +120,12 @@ export default function HomeScreen() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-space-sm">
                 <h1 className="font-headline-lg-mobile text-headline-lg-mobile text-primary tracking-tight font-bold">
-                  Hi, {user?.name?.split(' ')[0] || 'Commuter'} ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Â¹
+                  Hi, {user?.name?.split(' ')[0] || 'Commuter'} 👋
                 </h1>
               </div>
               <button
                 aria-label="Quick alerts"
-                onClick={() => showToast('Road notifications are not connected yet.', 'notifications')}
+                onClick={() => showToast('Road notifications are not connected in this local build.', 'notifications')}
                 className="relative w-10 h-10 rounded-full bg-surface-container-low flex items-center justify-center text-primary active:scale-95 transition-transform cursor-pointer border border-outline-variant/10"
               >
                 <span className="material-symbols-outlined text-[22px]">notifications</span>
@@ -98,16 +140,18 @@ export default function HomeScreen() {
                 </div>
                 <div className="flex flex-col min-w-0">
                   <span className="font-label-md text-label-md text-on-surface truncate font-semibold">
-                    Example area: Indiranagar
+                    {locationState === 'ready' ? 'Current location' : locationState === 'unsupported' ? 'Geolocation unavailable' : 'Location permission required'}
                   </span>
                   <div className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-                    <span className="font-label-sm text-label-sm text-on-surface-variant">Location tracking is not connected</span>
+                    <span className="font-label-sm text-label-sm text-on-surface-variant">
+                      {locationState === 'ready' ? `Live GPS active • ${locationText}` : locationText}
+                    </span>
                   </div>
                 </div>
               </div>
               <button
-                onClick={() => showToast('Location tracking is not connected yet.', 'my_location')}
+                onClick={() => showToast(locationState === 'ready' ? `Live GPS active: ${locationText}.` : 'Location permission is required to use live tracking.', 'my_location')}
                 className="text-surface-tint hover:text-primary transition-colors flex items-center shrink-0 p-1 cursor-pointer"
                 title="Recalibrate GPS"
               >
@@ -137,7 +181,7 @@ export default function HomeScreen() {
                   Safe Commute Mode
                 </h2>
                 <p className="font-body-sm text-body-sm text-on-primary-container leading-relaxed">
-                  Review recent community reports. Automatic vehicle detection and turn-by-turn guidance are not connected.
+                  Review recent community reports. Live vehicle detection and turn-by-turn guidance are not connected in this local build.
                 </p>
               </div>
 
@@ -196,7 +240,7 @@ export default function HomeScreen() {
               {hazards.map((hazard) => (
                 <article key={hazard._id} className="rounded-2xl bg-surface-container-lowest p-4 shadow-sm border border-outline-variant/10">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{hazard.severity} Ãƒâ€šÃ‚Â· {hazard.hazardType.replaceAll('_', ' ')}</span>
+                    <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{hazard.severity} · {hazard.hazardType.replaceAll('_', ' ')}</span>
                     <span className="text-xs capitalize text-secondary">{hazard.status}</span>
                   </div>
                   <h4 className="mt-2 font-semibold text-on-surface">{[hazard.roadName, hazard.area].filter(Boolean).join(', ') || 'Road location'}</h4>

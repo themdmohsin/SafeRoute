@@ -159,13 +159,13 @@ export default function DashboardScreen() {
           <div className="grid grid-cols-3 gap-2.5">
             <div className="p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10 flex flex-col">
               <span className="font-label-sm text-[11px] text-secondary font-semibold">Total reports</span>
-              <span className="font-display text-xl font-bold text-on-surface mt-1">{summary?.totalHazards ?? 'â€”'}</span>
+              <span className="font-display text-xl font-bold text-on-surface mt-1">{summary?.totalHazards ?? '—'}</span>
               <span className="font-body-sm text-[10px] text-secondary mt-0.5">Filtered reports</span>
             </div>
 
             <div className="p-3 rounded-2xl bg-surface-container-low shadow-sm border border-outline-variant/10 flex flex-col">
               <span className="font-label-sm text-[11px] text-secondary font-semibold">Low severity</span>
-              <span className="font-display text-xl font-bold text-emerald-700 mt-1">{summary?.severityBreakdown.find((item) => item.severity === 'low')?.count ?? 'â€”'}</span>
+              <span className="font-display text-xl font-bold text-emerald-700 mt-1">{summary?.severityBreakdown.find((item) => item.severity === 'low')?.count ?? '—'}</span>
               <span className="font-body-sm text-[10px] text-emerald-600 mt-0.5 font-medium">Low severity</span>
             </div>
 

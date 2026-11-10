@@ -173,7 +173,7 @@ export default function RideSummaryScreen() {
                 verified
               </span>
               <span className="font-label-sm text-label-sm font-bold uppercase tracking-wider">
-                Ride Completed â€¢ Just Now
+                Ride Completed • Just Now
               </span>
             </div>
 
@@ -216,7 +216,7 @@ export default function RideSummaryScreen() {
                 <span className="material-symbols-outlined text-primary text-[18px]">timer</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
-                <span className="font-display text-2xl font-bold text-on-surface">{ride?.durationMinutes ?? 'â€”'}</span>
+                <span className="font-display text-2xl font-bold text-on-surface">{ride?.durationMinutes ?? '—'}</span>
                 <span className="font-label-md text-secondary">minutes</span>
               </div>
               <span className="font-body-sm text-[11px] text-secondary mt-1">GPS speed not recorded</span>
@@ -229,7 +229,7 @@ export default function RideSummaryScreen() {
                 <span className="material-symbols-outlined text-on-tertiary-container text-[18px]">security</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
-                <span className="font-display text-2xl font-bold text-on-tertiary-container">{ride?.hazardsDetectedCount ?? 'â€”'}</span>
+                <span className="font-display text-2xl font-bold text-on-tertiary-container">{ride?.hazardsDetectedCount ?? '—'}</span>
                 <span className="font-label-md text-secondary">Craters</span>
               </div>
               <span className="font-body-sm text-[11px] text-emerald-700 font-medium mt-1">0 Impacts detected</span>
@@ -242,7 +242,7 @@ export default function RideSummaryScreen() {
                 <span className="material-symbols-outlined text-primary text-[18px]">military_tech</span>
               </div>
               <div className="flex items-baseline gap-1 mt-1">
-                <span className="font-display text-2xl font-bold text-primary">{ride?.hazardsReportedCount ?? 'â€”'}</span>
+                <span className="font-display text-2xl font-bold text-primary">{ride?.hazardsReportedCount ?? '—'}</span>
                 <span className="font-label-md text-secondary">reports</span>
               </div>
               <span className="font-body-sm text-[11px] text-primary font-medium mt-1">Submitted during this ride</span>

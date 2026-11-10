@@ -4,7 +4,9 @@ const TOKEN_KEY = 'saferoute_token';
 type ApiOptions = Omit<RequestInit, 'body'> & { body?: unknown };
 
 export async function apiRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  if (!API_BASE_URL) throw new Error('Set VITE_API_URL in the frontend environment to your backend API URL.');
+  if (!API_BASE_URL) {
+    throw new Error('Set VITE_API_URL in the production frontend environment to the public backend API URL. The backend is not publicly reachable in this deployment yet.');
+  }
   const token = localStorage.getItem(TOKEN_KEY);
   const headers = new Headers(options.headers);
   if (options.body !== undefined) headers.set('Content-Type', 'application/json');
