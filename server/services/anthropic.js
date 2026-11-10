@@ -27,14 +27,16 @@ export async function askAnthropic(question, context, systemInstruction) {
   if (!client) return null;
   const response = await client.messages.create({
     model: getModel(),
-    max_tokens: 1000,
+    max_tokens: 4096,
     system: systemInstruction,
     messages: [{
       role: 'user',
       content: `User question:\n${question}\n\nApplication data retrieved from MongoDB:\n${JSON.stringify(context)}`,
     }],
-  });
-  return getText(response);
+  }, { timeout: 60000 }); // long answers take longer than the 15s client default
+  const text = getText(response);
+  if (response.stop_reason === 'max_tokens') return `${text}\n\n(Answer was cut short. Ask a narrower question for the rest.)`;
+  return text;
 }
 
 export async function classifySeverity(description) {

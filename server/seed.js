@@ -33,7 +33,22 @@ const locations = {
   Marathahalli: [77.6974, 12.9591],
   Domlur: [77.6387, 12.9609],
   'Electronic City': [77.677, 12.8399],
+  Bellandur: [77.6762, 12.9257],
+  'MG Road': [77.6069, 12.9755],
+  Hebbal: [77.597, 13.0358],
+  Yelahanka: [77.5963, 13.1007],
+  'BTM Layout': [77.6101, 12.9166],
 };
+
+// Offset spreads reports along a road instead of stacking them on one area pin.
+const coordsFor = (spec) => {
+  const [lng, lat] = locations[spec.area];
+  const [dx, dy] = spec.offset || [0, 0];
+  return [Number((lng + dx).toFixed(6)), Number((lat + dy).toFixed(6))];
+};
+
+// ML reports carry the model fields the admin console and map show.
+const ml = (mlLabel, mlConfidence) => ({ source: 'ml', mlLabel, mlConfidence, modelVersion: 'rf-v1' });
 
 const reportSpecs = [
   { key: 'indiranagar-pothole-1', area: 'Indiranagar', roadName: '100 Feet Road near 12th Main', hazardType: 'pothole', severity: 'high', status: 'reported', source: 'manual', daysAgo: 1, description: 'Deep pothole across the left lane near the 12th Main junction; difficult to see after dusk.' },
@@ -54,6 +69,38 @@ const reportSpecs = [
   { key: 'hsr-speedbreaker-1', area: 'HSR Layout', roadName: 'Agara junction service road', hazardType: 'speed_breaker', severity: 'low', status: 'resolved', source: 'manual', daysAgo: 50, description: 'Low speed hump has uneven paint but remains visible in daylight.' },
   { key: 'jayanagar-manhole-1', area: 'Jayanagar', roadName: '9th Block near the park entrance', hazardType: 'open_manhole', severity: 'medium', status: 'reported', source: 'manual', daysAgo: 60, description: 'Drain lid rocks under vehicle weight and needs inspection.' },
   { key: 'marathahalli-pothole-1', area: 'Marathahalli', roadName: 'Marathahalli bridge approach', hazardType: 'pothole', severity: 'high', status: 'verified', source: 'sensor-detected', daysAgo: 75, description: 'Repeated impact damage has opened a deep pothole near the bridge approach.' },
+  { key: 'bellandur-water-2', area: 'Bellandur', offset: [0.0021, -0.0012], roadName: 'Sarjapur Road near Wipro junction', hazardType: 'waterlogging', severity: 'high', status: 'reported', source: 'manual', daysAgo: 0, description: 'Knee-deep water across both lanes after a heavy evening shower. Two-wheelers are stalling midway and cars are crawling single file. Storm drain inlets are choked with plastic waste.' },
+  { key: 'mgroad-pothole-1', area: 'MG Road', offset: [0.0034, 0.0006], roadName: 'MG Road near Trinity Circle', hazardType: 'pothole', severity: 'medium', status: 'verified', source: 'manual', daysAgo: 0, description: 'Pothole about 40 cm wide in the middle lane just past the metro pillar. Cars swerve suddenly to avoid it, and that is risky for bikes filtering through.' },
+  { key: 'hebbal-pothole-1', area: 'Hebbal', offset: [-0.0018, 0.0025], roadName: 'Hebbal flyover airport-bound ramp', hazardType: 'pothole', severity: 'high', status: 'reported', ...ml('pothole', 0.91), daysAgo: 1, description: 'Sharp vertical jolt picked up by multiple rides on the ramp. Severe pothole on the expansion joint, hard to see at highway speed.' },
+  { key: 'btm-manhole-1', area: 'BTM Layout', offset: [0.0011, 0.0009], roadName: '16th Main, BTM 2nd Stage', hazardType: 'open_manhole', severity: 'high', status: 'reported', source: 'manual', daysAgo: 1, description: 'Manhole cover fully removed during cable work and left open overnight. The only warning is a single plastic barricade with no lights.' },
+  { key: 'koramangala-speedbreaker-2', area: 'Koramangala', offset: [-0.0022, 0.0031], roadName: '5th Block, 1st Cross', hazardType: 'speed_breaker', severity: 'medium', status: 'reported', ...ml('speed_breaker', 0.84), daysAgo: 1, description: 'Tall unmarked speed breaker detected by ride sensors. It sits in the shade of a tree, so it is almost invisible at night.' },
+  { key: 'whitefield-manhole-2', area: 'Whitefield', offset: [0.0041, -0.0027], roadName: 'ITPL Main Road near Graphite India signal', hazardType: 'open_manhole', severity: 'medium', status: 'verified', source: 'manual', daysAgo: 2, description: 'Drain cover cracked in half. One piece has sunk and left a 15 cm gap along the left edge of the lane.' },
+  { key: 'orr-pothole-2', area: 'Outer Ring Road', offset: [-0.0063, 0.0045], roadName: 'ORR near Kadubeesanahalli flyover', hazardType: 'pothole', severity: 'high', status: 'verified', ...ml('pothole', 0.88), daysAgo: 2, description: 'A series of deep potholes over a 50 m stretch, confirmed by 6 separate rides. Heavy truck traffic keeps widening them.' },
+  { key: 'yelahanka-water-1', area: 'Yelahanka', offset: [0.0015, -0.0033], roadName: 'Yelahanka New Town underpass', hazardType: 'waterlogging', severity: 'high', status: 'reported', source: 'manual', daysAgo: 3, description: 'Underpass flooded up to the bumper line. Police have closed one side, and traffic is backing up onto Doddaballapur Road.' },
+  { key: 'jayanagar-other-1', area: 'Jayanagar', offset: [0.0027, -0.0014], roadName: '30th Cross, 4th T Block', hazardType: 'other', severity: 'medium', status: 'reported', source: 'manual', daysAgo: 3, description: 'A fallen tree branch is blocking half the road after strong winds, and loose wires hang low over it. BBMP has been informed.' },
+  { key: 'electroniccity-water-2', area: 'Electronic City', offset: [0.0052, 0.0019], roadName: 'Neeladri Road near Infosys gate', hazardType: 'waterlogging', severity: 'medium', status: 'verified', source: 'sensor-detected', daysAgo: 4, description: 'Recurring water pooling at the dip near the campus gate. It hides a broken road edge underneath.' },
+  { key: 'indiranagar-speedbreaker-2', area: 'Indiranagar', offset: [-0.0031, -0.0021], roadName: 'Double Road near ESI Hospital', hazardType: 'speed_breaker', severity: 'low', status: 'verified', ...ml('speed_breaker', 0.77), daysAgo: 4, description: 'Rumble strip followed by a speed breaker. The markings are visible, but riders keep braking hard here.' },
+  { key: 'hsr-pothole-2', area: 'HSR Layout', offset: [0.0024, 0.0037], roadName: '19th Main, Sector 1 near BDA Complex', hazardType: 'pothole', severity: 'medium', status: 'reported', source: 'manual', daysAgo: 5, description: 'Road cut for a water pipeline was never fully restored. The sunken trench runs across the lane and catches scooter wheels.' },
+  { key: 'marathahalli-water-2', area: 'Marathahalli', offset: [-0.0016, 0.0028], roadName: 'Marathahalli-Sarjapur ORR service road', hazardType: 'waterlogging', severity: 'high', status: 'reported', ...ml('pothole', 0.69), daysAgo: 5, description: 'Waterlogging over a pothole cluster. Ride sensors flagged repeated hard impacts under the water, so the depth cannot be judged.' },
+  { key: 'domlur-pothole-2', area: 'Domlur', offset: [0.0019, -0.0024], roadName: 'Old Airport Road near Domlur flyover', hazardType: 'pothole', severity: 'medium', status: 'resolved', source: 'manual', daysAgo: 6, description: 'Pothole near the bus bay has been patched with cold mix. The surface is now uneven but safe at normal speed.' },
+  { key: 'silkboard-water-2', area: 'Silk Board', offset: [-0.0027, 0.0013], roadName: 'Hosur Road towards Bommanahalli', hazardType: 'waterlogging', severity: 'high', status: 'verified', source: 'manual', daysAgo: 7, description: 'Heavy waterlogging under the metro construction zone. Barricades narrow the road to one lane, and water hides the trench edges.' },
+  { key: 'mgroad-manhole-1', area: 'MG Road', offset: [-0.0041, -0.0008], roadName: 'Brigade Road junction', hazardType: 'open_manhole', severity: 'medium', status: 'resolved', source: 'manual', daysAgo: 8, description: 'Raised manhole frame near the pedestrian crossing has been levelled and resurfaced by BBMP.' },
+  { key: 'hebbal-speedbreaker-1', area: 'Hebbal', offset: [0.0036, -0.0019], roadName: 'Bellary Road service lane near Esteem Mall', hazardType: 'speed_breaker', severity: 'medium', status: 'reported', ...ml('speed_breaker', 0.81), daysAgo: 9, description: 'Back-to-back speed breakers with no paint, found from several ride traces. Riders coming off the flyover hit them hard.' },
+  { key: 'bellandur-pothole-1', area: 'Bellandur', offset: [-0.0033, 0.0018], roadName: 'Bellandur lake bund road', hazardType: 'pothole', severity: 'high', status: 'reported', source: 'manual', daysAgo: 10, description: 'Broken stretch with potholes and loose gravel along the lake road. There are no streetlights, so it is very risky after dark.' },
+  { key: 'btm-pothole-1', area: 'BTM Layout', offset: [-0.0021, -0.0016], roadName: 'BTM Lake road near Udupi Garden signal', hazardType: 'pothole', severity: 'low', status: 'verified', ...ml('pothole', 0.72), daysAgo: 11, description: 'Shallow potholes at the signal stop line. They are minor, but riders brake on gravel there.' },
+  { key: 'koramangala-manhole-2', area: 'Koramangala', offset: [0.0029, -0.0026], roadName: 'Inner Ring Road near Forum Mall', hazardType: 'open_manhole', severity: 'high', status: 'resolved', source: 'manual', daysAgo: 13, description: 'Open storm drain chamber has been closed with a new concrete slab after the report.' },
+  { key: 'whitefield-speedbreaker-2', area: 'Whitefield', offset: [-0.0048, 0.0014], roadName: 'Brookefield main road', hazardType: 'speed_breaker', severity: 'low', status: 'resolved', source: 'manual', daysAgo: 15, description: 'Speed breaker repainted with thermoplastic stripes and given a warning sign.' },
+  { key: 'yelahanka-pothole-1', area: 'Yelahanka', offset: [-0.0024, 0.0021], roadName: 'Yelahanka Old Town market road', hazardType: 'pothole', severity: 'medium', status: 'reported', ...ml('pothole', 0.86), daysAgo: 16, description: 'Market-side potholes with frequent vehicle impacts in ride data. Parked carts push traffic straight over them.' },
+  { key: 'indiranagar-manhole-2', area: 'Indiranagar', offset: [0.0016, 0.0032], roadName: '80 Feet Road, HAL 2nd Stage', hazardType: 'open_manhole', severity: 'medium', status: 'verified', source: 'manual', daysAgo: 18, description: 'Manhole sits 8 cm below the road surface in the bike lane. The front wheel drops sharply into it.' },
+  { key: 'orr-water-2', area: 'Outer Ring Road', offset: [0.0058, -0.0031], roadName: 'ORR at Devarabeesanahalli', hazardType: 'waterlogging', severity: 'medium', status: 'resolved', source: 'sensor-detected', daysAgo: 20, description: 'Drain desilting has cleared the recurring water pool. The road has been dry after the last two rains.' },
+  { key: 'electroniccity-other-1', area: 'Electronic City', offset: [-0.0039, -0.0022], roadName: 'Electronic City elevated tollway exit', hazardType: 'other', severity: 'high', status: 'reported', source: 'manual', daysAgo: 22, description: 'Oil spill across the exit ramp after a tanker leak. The surface is slippery and two minor skids were seen.' },
+  { key: 'hsr-manhole-2', area: 'HSR Layout', offset: [-0.0029, -0.0018], roadName: '14th Main, Sector 7', hazardType: 'open_manhole', severity: 'high', status: 'reported', source: 'manual', daysAgo: 27, description: 'Sewer manhole lid lifts and overflows during rain, leaving the opening partly exposed. Local residents have put a stone on it as a marker.' },
+  { key: 'jayanagar-speedbreaker-2', area: 'Jayanagar', offset: [-0.0019, 0.0027], roadName: 'South End Circle approach', hazardType: 'speed_breaker', severity: 'low', status: 'verified', ...ml('speed_breaker', 0.79), daysAgo: 33, description: 'Speed breaker sits right after a bend, so it is visible late. Ride data shows most riders braking on it.' },
+  { key: 'domlur-water-2', area: 'Domlur', offset: [-0.0023, 0.0017], roadName: 'Amarjyoti Layout main road', hazardType: 'waterlogging', severity: 'low', status: 'resolved', source: 'manual', daysAgo: 40, description: 'Minor puddling has been fixed by re-sloping the road edge.' },
+  { key: 'mgroad-water-1', area: 'MG Road', offset: [0.0012, -0.0029], roadName: 'Richmond Road near Richmond Circle', hazardType: 'waterlogging', severity: 'medium', status: 'verified', source: 'sensor-detected', daysAgo: 47, description: 'Water collects in the left lane after rain because of a blocked culvert, leaving a 20 m stretch underwater.' },
+  { key: 'hebbal-water-1', area: 'Hebbal', offset: [-0.0044, -0.0012], roadName: 'Hebbal lake service road', hazardType: 'waterlogging', severity: 'high', status: 'resolved', source: 'manual', daysAgo: 55, description: 'Flooding from the lake overflow has been cleared, and new drains were added along the service road.' },
+  { key: 'marathahalli-speedbreaker-1', area: 'Marathahalli', offset: [0.0031, -0.0035], roadName: 'Kundalahalli gate road', hazardType: 'speed_breaker', severity: 'medium', status: 'reported', ...ml('speed_breaker', 0.83), daysAgo: 66, description: 'New speed breaker built without signage. Ride sensors spotted a sudden spike in vertical acceleration events here.' },
+  { key: 'btm-water-1', area: 'BTM Layout', offset: [0.0026, -0.0031], roadName: 'Madiwala underpass', hazardType: 'waterlogging', severity: 'high', status: 'verified', source: 'manual', daysAgo: 85, description: 'Underpass floods every monsoon, and buses have stalled inside it. Avoid it during heavy rain and take the Hosur Road surface route instead.' },
 ];
 
 function stableObjectId(value) {
@@ -61,7 +108,7 @@ function stableObjectId(value) {
 }
 
 function sameReport(existing, spec, userId) {
-  const [longitude, latitude] = locations[spec.area];
+  const [longitude, latitude] = coordsFor(spec);
   return existing.reportedBy.toString() === userId.toString()
     && existing.hazardType === spec.hazardType
     && existing.severity === spec.severity
@@ -135,11 +182,15 @@ async function main() {
       hazardType: spec.hazardType,
       severity: spec.severity,
       description: spec.description,
-      location: { type: 'Point', coordinates: locations[spec.area] },
+      location: { type: 'Point', coordinates: coordsFor(spec) },
       roadName: spec.roadName,
       area: spec.area,
       status: spec.status,
       source: spec.source,
+      mlLabel: spec.mlLabel ?? null,
+      mlConfidence: spec.mlConfidence ?? null,
+      modelVersion: spec.modelVersion ?? null,
+      timestamp: spec.source === 'ml' ? createdAt : null,
       createdAt,
       updatedAt: createdAt,
     });
