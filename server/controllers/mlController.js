@@ -1,5 +1,5 @@
 import HazardReport from '../models/HazardReport.js';
-import { getHazardThreshold, inferWindow, shouldDebounceMlDetection } from '../services/mlHazardService.js';
+import { inferWindow, shouldDebounceMlDetection } from '../services/mlHazardService.js';
 
 const hazardTypeMap = {
   pothole: 'pothole',
@@ -16,7 +16,7 @@ function normalizeCoordinates(window = {}) {
 export async function inferMlWindow(req, res) {
   try {
     const prediction = await inferWindow(req.body?.window ?? req.body);
-    return res.json({ prediction, threshold: getHazardThreshold() });
+    return res.json({ prediction, threshold: prediction.threshold });
   } catch (error) {
     return res.status(400).json({ message: error.message || 'ML inference failed.' });
   }
@@ -26,9 +26,7 @@ export async function createMlHazard(req, res) {
   try {
     const window = req.body?.window ?? req.body ?? {};
     const prediction = await inferWindow(window);
-    const threshold = getHazardThreshold();
-
-    if (prediction.label === 'normal' || prediction.confidence < threshold) {
+    if (prediction.label === 'normal' || prediction.confidence < prediction.threshold) {
       return res.json({ prediction, createdHazard: false, reason: prediction.label === 'normal' ? 'normal' : 'below_confidence_threshold' });
     }
 

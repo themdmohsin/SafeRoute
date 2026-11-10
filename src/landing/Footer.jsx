@@ -73,6 +73,11 @@ export default function Footer() {
           <span>SafeRoute — a 24CIE554 Full Stack Development project.</span>
           <span>Bengaluru, India</span>
         </div>
+        <p className="mt-3 text-xs text-[#5c6d8f]">
+          Hazard model trained on RoadSens-4M (Khandakar et al., 2026, <i>Scientific Data</i>),{' '}
+          <a href="https://doi.org/10.6084/m9.figshare.30341143.v3" target="_blank" rel="noreferrer" className="underline hover:text-[#ffb955]">doi:10.6084/m9.figshare.30341143.v3</a>, licensed{' '}
+          <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" className="underline hover:text-[#ffb955]">CC BY 4.0</a>.
+        </p>
       </div>
     </footer>
   );

@@ -1,0 +1,43 @@
+{
+  "modelVersion": "blocked",
+  "status": "training-blocked",
+  "classes": [
+    "normal",
+    "speed_breaker",
+    "pothole"
+  ],
+  "features": [
+    "accel_mean_x",
+    "accel_mean_y",
+    "accel_mean_z",
+    "accel_std_x",
+    "accel_std_y",
+    "accel_std_z",
+    "accel_min_x",
+    "accel_min_y",
+    "accel_min_z",
+    "accel_max_x",
+    "accel_max_y",
+    "accel_max_z",
+    "accel_magnitude_mean",
+    "accel_magnitude_std",
+    "accel_magnitude_max",
+    "gravity_x",
+    "gravity_y",
+    "gravity_z",
+    "gravity_tiltDeg",
+    "gyro_mean_x",
+    "gyro_mean_y",
+    "gyro_mean_z",
+    "gyro_std_x",
+    "gyro_std_y",
+    "gyro_std_z",
+    "gyro_maxMagnitudeDegPerS",
+    "gps_speedMps"
+  ],
+  "notes": "No legitimate labelled road-sensor dataset has been downloaded in this environment. Final model training is blocked until a reusable real dataset is available.",
+  "training": {
+    "source": "blocked",
+    "reason": "real dataset required"
+  }
+}

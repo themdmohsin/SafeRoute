@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RandomForestClassifier } from 'ml-random-forest';
-import { buildFeatureVector, FEATURE_NAMES, labelFromIndex } from '../ml/featureVector.js';
+import { buildFeatureVector, FEATURE_NAMES, LABEL_CLASSES, labelFromIndex } from '../ml/featureVector.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,8 +32,9 @@ export async function loadModelArtifact(artifactLocation = artifactPath) {
   }
 }
 
-export function getHazardThreshold() {
-  const configured = Number(process.env.ML_HAZARD_CONFIDENCE_THRESHOLD ?? '0.72');
+// ML_HAZARD_CONFIDENCE_THRESHOLD overrides the threshold tuned at training time (artifact.hazardThreshold).
+export function getHazardThreshold(artifact) {
+  const configured = Number(process.env.ML_HAZARD_CONFIDENCE_THRESHOLD ?? artifact?.hazardThreshold ?? 0.72);
   if (!Number.isFinite(configured)) return 0.72;
   return Math.min(1, Math.max(0, configured));
 }
@@ -52,17 +53,24 @@ export async function inferWindow(window = {}, options = {}) {
   }
 
   const artifact = await loadModelArtifact(options.modelPath || artifactPath);
-  const model = RandomForestClassifier.load(artifact.model);
+  // Build the forest once per cached artifact (60 trees; rebuilding per request is wasteful).
+  const model = (artifact.loadedModel ??= RandomForestClassifier.load(artifact.model));
   const featureVector = buildFeatureVector(window);
   const imputedVector = imputeMissingValues(featureVector, artifact.medians ?? Array(FEATURE_NAMES.length).fill(0));
 
-  const prediction = model.predict([imputedVector])[0];
-  const label = labelFromIndex(prediction);
-  const confidence = asConfidence(model.predictProbability([imputedVector], prediction)[0]);
+  // Per-class vote fractions (the library's predictProbability skips the first tree's vote).
+  const votes = model.predictionValues([imputedVector]).getRow(0);
+  const probabilities = LABEL_CLASSES.map((_, c) => votes.filter((v) => v === c).length / votes.length);
+  // Hazard iff P(hazard) = 1 - P(normal) clears the threshold; type = likelier hazard class (ml/train.py `decide`).
+  const hazardProbability = asConfidence(1 - probabilities[0]);
+  const threshold = getHazardThreshold(artifact);
+  const label = hazardProbability >= threshold ? labelFromIndex(probabilities[2] > probabilities[1] ? 2 : 1) : 'normal';
 
   return {
     label,
-    confidence,
+    confidence: label === 'normal' ? asConfidence(probabilities[0]) : hazardProbability,
+    probabilities: Object.fromEntries(LABEL_CLASSES.map((name, c) => [name, probabilities[c]])),
+    threshold,
     modelVersion: artifact.modelVersion,
     features: FEATURE_NAMES,
     featureVector: imputedVector,

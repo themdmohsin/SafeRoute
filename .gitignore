@@ -10,3 +10,8 @@ coverage/
 
 .vercel
 .env*
+
+# ML dataset (RoadSens-4M, not committed)
+ml/data/
+ml/logs/
+__pycache__/

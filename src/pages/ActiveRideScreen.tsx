@@ -166,14 +166,14 @@ export default function ActiveRideScreen() {
       samples = []; startedAt = Date.now();
       const here = posRef.current;
       if (batch.length < 20 || !here) return;
-      const summary = summarizeWindow(batch);
+      const summary = summarizeWindow(batch, (Date.now() - from) / 1000);
       if (summary.accel.magnitude.max < 2.5) return; // smooth road: skip the network call
       seq += 1;
       apiRequest<{ createdHazard: boolean; prediction: { label: string; confidence: number } }>('/ml/hazard', {
         method: 'POST',
         body: {
           window: {
-            schemaVersion: 1, windowId: `${rideId}-${seq}`, rideId, seq,
+            schemaVersion: 2, windowId: `${rideId}-${seq}`, rideId, seq,
             startedAt: new Date(from).toISOString(), endedAt: new Date().toISOString(), durationMs: Date.now() - from,
             gps: { lat: here.lat, lng: here.lng, speedMps: speedRef.current ?? undefined },
             ...summary,

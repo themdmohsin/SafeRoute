@@ -19,7 +19,55 @@ export function sampleFromEvent(e: DeviceMotionEvent): MotionSample | null {
   };
 }
 
-export function summarizeWindow(samples: MotionSample[]) {
+// Orientation-independent features the model uses. Must match ml/features.py exactly
+// (parity test: server/tests/featureParity.test.js).
+const SIGNALS = ['accTotal', 'accLinear', 'vertical', 'horizontal', 'gyro', 'jerk'] as const;
+const STATS = ['mean', 'std', 'min', 'max', 'ptp', 'rms', 'skew', 'kurt', 'zcr', 'domFreq', 'bandLow', 'bandHigh'] as const;
+export const FEATURE_NAMES = SIGNALS.flatMap((s) => STATS.map((t) => `${s}_${t}`));
+
+function signalStats(x: number[], duration: number): number[] {
+  const n = x.length;
+  const m = mean(x);
+  const d = x.map((v) => v - m);
+  const variance = mean(d.map((v) => v * v));
+  const sd = Math.sqrt(variance);
+  const skew = sd > 1e-9 ? mean(d.map((v) => v ** 3)) / sd ** 3 : 0;
+  const kurt = sd > 1e-9 ? mean(d.map((v) => v ** 4)) / variance ** 2 - 3 : 0;
+  let crossings = 0;
+  for (let i = 0; i + 1 < n; i++) if (d[i] * d[i + 1] < 0) crossings++;
+  let dom = 0; let best = -1; let low = 0; let high = 0;
+  for (let k = 0; k <= Math.floor(n / 2); k++) {
+    let re = 0; let im = 0;
+    for (let t = 0; t < n; t++) { const a = (2 * Math.PI * k * t) / n; re += d[t] * Math.cos(a); im += d[t] * Math.sin(a); }
+    const power = (re * re + im * im) / (n * n);
+    const f = k / duration;
+    if (k >= 1 && power > best) { best = power; dom = f; }
+    if (f >= 0.5 && f < 5) low += power;
+    if (f >= 5 && f < 15) high += power;
+  }
+  const min = Math.min(...x); const max = Math.max(...x);
+  return [m, sd, min, max, max - min, Math.sqrt(mean(x.map((v) => v * v))), skew, kurt, crossings / duration, n > 2 ? dom : 0, low, high];
+}
+
+export function computeWindowFeatures(samples: MotionSample[], durationS: number): Record<string, number> {
+  const lin = samples.map((s) => Math.hypot(s.ax, s.ay, s.az));
+  const vert = samples.map((s) => {
+    const g = Math.hypot(s.gx, s.gy, s.gz);
+    return (s.ax * s.gx + s.ay * s.gy + s.az * s.gz) / (g > 1e-6 ? g : 1);
+  });
+  const signals: Record<(typeof SIGNALS)[number], number[]> = {
+    accTotal: samples.map((s) => Math.hypot(s.ax + s.gx, s.ay + s.gy, s.az + s.gz)),
+    accLinear: lin,
+    vertical: vert,
+    horizontal: lin.map((l, i) => Math.sqrt(Math.max(l * l - vert[i] * vert[i], 0))),
+    gyro: samples.map((s) => Math.hypot(s.rx, s.ry, s.rz)),
+    jerk: samples.slice(1).map((s, i) => Math.hypot(s.ax - samples[i].ax, s.ay - samples[i].ay, s.az - samples[i].az) * samples.length / durationS),
+  };
+  const values = SIGNALS.flatMap((s) => signalStats(signals[s], durationS));
+  return Object.fromEntries(FEATURE_NAMES.map((name, i) => [name, values[i]]));
+}
+
+export function summarizeWindow(samples: MotionSample[], durationS = 2) {
   const stats = (keys: [keyof MotionSample, keyof MotionSample, keyof MotionSample]) => {
     const [x, y, z] = keys.map((k) => axis(samples, k));
     return {
@@ -38,5 +86,6 @@ export function summarizeWindow(samples: MotionSample[]) {
     accel: { ...accel, magnitude: { mean: mean(magnitude), std: std(magnitude), max: Math.max(...magnitude) } },
     gravity: { x: gx, y: gy, z: gz, tiltDeg: (Math.atan2(Math.abs(gz), Math.hypot(gx, gy)) * 180) / Math.PI },
     gyro: { mean: gyro.mean, std: gyro.std, maxMagnitudeDegPerS: Math.max(...samples.map((s) => Math.hypot(s.rx, s.ry, s.rz))) },
+    features: computeWindowFeatures(samples, durationS),
   };
 }
